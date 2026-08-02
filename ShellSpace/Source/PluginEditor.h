@@ -2,7 +2,7 @@
 
 #include "PluginProcessor.h"
 
-/** ラベル付きノブ1個ぶん。 */
+/** ラベル付きノブ。音色を決めるパラメータ用。 */
 struct Knob  : public juce::Component
 {
     Knob (juce::AudioProcessorValueTreeState& s, const juce::String& id, const juce::String& text);
@@ -11,6 +11,31 @@ struct Knob  : public juce::Component
     juce::Slider slider;
     juce::Label  label;
     juce::AudioProcessorValueTreeState::SliderAttachment attachment;
+};
+
+/** dB目盛り付きの縦フェーダー。レベル系はこちら。
+    ミキサーと同じ操作感になるので、量の調整はノブより速い。 */
+struct Fader  : public juce::Component,
+                private juce::Slider::Listener
+{
+    Fader (juce::AudioProcessorValueTreeState& s, const juce::String& id,
+           const std::vector<float>& scaleMarks);
+    ~Fader() override;
+
+    void paint (juce::Graphics&) override;
+    void resized() override;
+
+    juce::Slider slider;
+    juce::Label  value;
+    juce::AudioProcessorValueTreeState::SliderAttachment attachment;
+
+private:
+    void sliderValueChanged (juce::Slider*) override;
+    /** 目盛りのdB値 -> フェーダー内のY座標 */
+    float yForDb (float db) const;
+
+    std::vector<float> marks;
+    juce::Rectangle<int> trackArea;
 };
 
 class ShellSpaceEditor  : public juce::AudioProcessorEditor,
@@ -22,9 +47,8 @@ public:
     void paint (juce::Graphics&) override;
     void resized() override;
 
-    /** paint と resized が同じ矩形を見るようにするための共有計算。
-        別々に座標を書くとズレる。 */
-    juce::Rectangle<int> sectionBounds (int index) const;
+    /** paint と resized が同じ矩形を見るようにするための共有計算。 */
+    juce::Rectangle<int> columnBounds (int index) const;
 
 private:
     void timerCallback() override;
@@ -35,19 +59,20 @@ private:
 
     juce::ComboBox presetBox;
     juce::ComboBox bodyType, spaceType;
-
-    // 項目を入れてからアタッチする必要があるので、メンバ初期化子では作れない。
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> bodyTypeAtt, spaceTypeAtt;
 
     juce::TextButton bodyIRButton, spaceIRButton;
-    juce::ToggleButton trueStereoToggle { "True Stereo" };
+    juce::ToggleButton trueStereoToggle { "True St." };
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> trueStereoAtt;
+
+    // 各チャンネルの MUTE と、マスターの BYPASS
+    juce::TextButton muteButtons[4];
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> muteAtts[4];
 
     juce::Label statusLabel;
 
-    Knob bodyTune, bodyLevel;
-    Knob spacePre, spaceLevel;
-    Knob hpf, dry, out;
+    Knob  bodyTune, spacePre, hpf;
+    Fader bodyLevel, spaceLevel, dry, out;
 
     std::unique_ptr<juce::FileChooser> chooser;
     int lastProgram { -1 };

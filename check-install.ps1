@@ -7,8 +7,8 @@ param([switch]$Fix)
 
 $ErrorActionPreference = 'Continue'
 
-$ExpectedHash = '861DEADAFEEC62E933F5C431048FC7BED1A31E51B3907C561DACF74C858009CF'
-$ExpectedSize = 13743616
+$ExpectedHash = '59BFE4067B330BAF91EB0C99F1BF07DB5FDB192C339F3D6BBE7D9F1BEB5F96DD'
+$ExpectedSize = 13753856
 
 Add-Type -Namespace Win -Name Native -MemberDefinition @'
 [DllImport("kernel32.dll", SetLastError=true, CharSet=CharSet.Unicode)]

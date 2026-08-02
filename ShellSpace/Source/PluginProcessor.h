@@ -53,10 +53,16 @@ public:
     /** 直近の読み込みが失敗していればその理由。成功時は空。 */
     juce::String getIRError (bool body) const;
 
+    /** ホスト側のバイパスと連動させる */
+    juce::AudioParameterBool* getBypassParameter() const override
+    {
+        return dynamic_cast<juce::AudioParameterBool*> (apvts.getParameter ("bypass"));
+    }
+
     juce::AudioProcessorValueTreeState apvts;
 
-    static constexpr int kEditorWidth  = 322;
-    static constexpr int kEditorHeight = 470;
+    static constexpr int kEditorWidth  = 448;
+    static constexpr int kEditorHeight = 518;
 
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();

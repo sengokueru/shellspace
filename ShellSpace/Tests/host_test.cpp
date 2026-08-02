@@ -253,8 +253,8 @@ int main (int argc, char** argv)
     if (auto* ed = instance->createEditorIfNeeded())
     {
         std::cout << "  size: " << ed->getWidth() << " x " << ed->getHeight() << std::endl;
-        check (ed->getWidth() == 322 && ed->getHeight() == 470,
-               "エディタサイズが 322x470 で伝わる",
+        check (ed->getWidth() == 448 && ed->getHeight() == 518,
+               "エディタサイズが 448x518 で伝わる",
                juce::String (ed->getWidth()) + "x" + juce::String (ed->getHeight()));
         delete ed;   // デストラクタが editorBeingDeleted を呼ぶ
     }

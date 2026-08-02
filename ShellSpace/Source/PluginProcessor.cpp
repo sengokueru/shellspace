@@ -114,6 +114,18 @@ juce::AudioProcessorValueTreeState::ParameterLayout ShellSpaceProcessor::createL
     layout.add (std::make_unique<AudioParameterBool> (
         ParameterID { "trueStereo", 1 }, "True Stereo", false));
 
+    layout.add (std::make_unique<AudioParameterBool> (
+        ParameterID { "bodyMute", 1 }, "Body Mute", false));
+
+    layout.add (std::make_unique<AudioParameterBool> (
+        ParameterID { "spaceMute", 1 }, "Space Mute", false));
+
+    layout.add (std::make_unique<AudioParameterBool> (
+        ParameterID { "dryMute", 1 }, "Dry Mute", false));
+
+    layout.add (std::make_unique<AudioParameterBool> (
+        ParameterID { "bypass", 1 }, "Bypass", false));
+
     layout.add (std::make_unique<AudioParameterFloat> (
         ParameterID { "hpf", 1 }, "Wet HPF",
         NormalisableRange<float> { 20.0f, 400.0f, 1.0f, 0.4f }, 20.0f,
@@ -192,6 +204,12 @@ void ShellSpaceProcessor::setCurrentProgram (int index)
     for (auto& v : values)
         if (auto* param = apvts.getParameter (v.id))
             param->setValueNotifyingHost (v.v);
+
+    // ミュート類はプリセットに含めない。切り替えたら必ず解除しておく
+    // (残っていると「プリセットを選んだのに鳴らない」になる)
+    for (auto* id : { "bodyMute", "spaceMute", "dryMute", "bypass" })
+        if (auto* param = apvts.getParameter (id))
+            param->setValueNotifyingHost (0.0f);
 }
 
 //==============================================================================
@@ -436,9 +454,16 @@ void ShellSpaceProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     if (numCh <= 0 || total <= 0)
         return;
 
-    gDry  .setTargetValue (dbToGain (apvts.getRawParameterValue ("dry")->load()));
-    gBody .setTargetValue (dbToGain (apvts.getRawParameterValue ("bodyLevel")->load()));
-    gSpace.setTargetValue (dbToGain (apvts.getRawParameterValue ("spaceLevel")->load()));
+    // バイパス中は何もせず素通し。畳み込みに遅延が無いのでこれで整合する。
+    if (apvts.getRawParameterValue ("bypass")->load() > 0.5f)
+        return;
+
+    // ミュートはゲイン0にするだけ。SmoothedValue が滑らかに落とすのでプチらない。
+    auto muted = [this] (const char* id) { return apvts.getRawParameterValue (id)->load() > 0.5f; };
+
+    gDry  .setTargetValue (muted ("dryMute")   ? 0.0f : dbToGain (apvts.getRawParameterValue ("dry")->load()));
+    gBody .setTargetValue (muted ("bodyMute")  ? 0.0f : dbToGain (apvts.getRawParameterValue ("bodyLevel")->load()));
+    gSpace.setTargetValue (muted ("spaceMute") ? 0.0f : dbToGain (apvts.getRawParameterValue ("spaceLevel")->load()));
     gOut  .setTargetValue (juce::Decibels::decibelsToGain (apvts.getRawParameterValue ("out")->load()));
 
     // ホストが prepareToPlay で伝えたブロック長を超えて呼んでくることがある。

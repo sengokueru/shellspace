@@ -4,23 +4,31 @@ namespace
 {
     const juce::Colour kBack   { 0xff1b1d21 };
     const juce::Colour kPanel  { 0xff24272c };
+    const juce::Colour kStrip  { 0xff2e333a };
     const juce::Colour kText   { 0xffd8dce3 };
     const juce::Colour kAccent { 0xff6fb2ff };
     const juce::Colour kWarn   { 0xffe0a04a };
 
-    constexpr int kPad       = 12;   // 外周
-    constexpr int kHeader    = 58;   // タイトル + プリセット
-    constexpr int kTitleH    = 22;   // セクション見出し
-    constexpr int kKnobW     = 78;
-    constexpr int kKnobH     = 88;
-    constexpr int kKnobGap   = 4;
-    constexpr int kComboW    = 108;  // "Hall Drum" が省略されない幅
-    constexpr int kComboH    = 26;
-    constexpr int kSmallH    = 20;
-    constexpr int kInnerPad  = 10;   // セクション内側
-    constexpr int kGap       = 10;   // セクション間
-    constexpr int kSectionH  = kTitleH + kKnobH + 8;
-    constexpr int kStatusH   = 26;
+    constexpr int kPad      = 12;
+    constexpr int kHeader   = 58;   // タイトル + プリセット
+    constexpr int kColW     = 100;
+    constexpr int kColGap   = 8;
+    constexpr int kNumCols  = 4;
+    constexpr int kTopH     = 188;  // 選択・ボタン・ノブ（ノブが掴める大きさになる高さ）
+    constexpr int kMuteH    = 26;   // MUTE / BYPASS
+    constexpr int kFaderH   = 180;
+    constexpr int kNameH    = 24;   // 一番下の名前帯
+    constexpr int kStatusH  = 24;
+    constexpr int kInner    = 6;
+    constexpr int kSmallH   = 20;
+    constexpr int kComboH   = 24;
+
+    const juce::Colour kMuteOn { 0xffc94f4f };
+
+    constexpr int kEditorW = kPad * 2 + kColW * kNumCols + kColGap * (kNumCols - 1);
+    constexpr int kEditorH = kHeader + kTopH + kMuteH + kFaderH + kNameH + 6 + kStatusH + kPad;
+
+    constexpr int kThumb = 9;   // フェーダーのつまみ半径ぶんの余白
 
     /** juce::String(const char*) は中身をASCIIとして扱うので、UTF-8の日本語が
         1バイト1文字に分解されて化ける。日本語リテラルは必ずこれを通す。 */
@@ -32,7 +40,7 @@ Knob::Knob (juce::AudioProcessorValueTreeState& s, const juce::String& id, const
     : attachment (s, id, slider)
 {
     slider.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
-    slider.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 70, 16);
+    slider.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 66, 15);
     slider.setColour (juce::Slider::rotarySliderFillColourId, kAccent);
     slider.setColour (juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
     slider.setColour (juce::Slider::textBoxTextColourId, kText);
@@ -41,27 +49,107 @@ Knob::Knob (juce::AudioProcessorValueTreeState& s, const juce::String& id, const
     label.setText (text, juce::dontSendNotification);
     label.setJustificationType (juce::Justification::centred);
     label.setColour (juce::Label::textColourId, kText.withAlpha (0.75f));
-    label.setFont (juce::FontOptions (11.0f));
+    label.setFont (juce::FontOptions (10.0f));
     addAndMakeVisible (label);
 }
 
 void Knob::resized()
 {
     auto r = getLocalBounds();
-    label.setBounds (r.removeFromTop (14));
+    label.setBounds (r.removeFromTop (13));
     slider.setBounds (r);
+}
+
+//==============================================================================
+Fader::Fader (juce::AudioProcessorValueTreeState& s, const juce::String& id,
+              const std::vector<float>& scaleMarks)
+    : attachment (s, id, slider), marks (scaleMarks)
+{
+    slider.setSliderStyle (juce::Slider::LinearVertical);
+    slider.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
+    slider.setColour (juce::Slider::trackColourId, kAccent.withAlpha (0.55f));
+    slider.setColour (juce::Slider::backgroundColourId, kBack);
+    slider.setColour (juce::Slider::thumbColourId, kText.withAlpha (0.92f));
+    slider.addListener (this);
+    addAndMakeVisible (slider);
+
+    value.setJustificationType (juce::Justification::centred);
+    value.setColour (juce::Label::textColourId, kText);
+    value.setFont (juce::FontOptions (12.0f));
+    addAndMakeVisible (value);
+
+    sliderValueChanged (&slider);
+}
+
+Fader::~Fader()
+{
+    slider.removeListener (this);
+}
+
+void Fader::sliderValueChanged (juce::Slider*)
+{
+    const double v = slider.getValue();
+    value.setText (v <= -59.5 ? u8 ("切") : juce::String (v, 1), juce::dontSendNotification);
+}
+
+float Fader::yForDb (float db) const
+{
+    const auto range = slider.getRange();
+    const double t = (db - range.getStart()) / (range.getEnd() - range.getStart());
+
+    const float top    = (float) trackArea.getY() + kThumb;
+    const float bottom = (float) trackArea.getBottom() - kThumb;
+    return bottom - (float) t * (bottom - top);
+}
+
+void Fader::resized()
+{
+    auto r = getLocalBounds();
+    value.setBounds (r.removeFromBottom (16));
+    r.removeFromBottom (2);
+
+    trackArea = r.removeFromLeft (44);
+    slider.setBounds (trackArea);
+}
+
+void Fader::paint (juce::Graphics& g)
+{
+    // 目盛り。数値だけでなく刻みがあると、量の見当が一目でつく
+    auto scale = getLocalBounds().withTrimmedLeft (trackArea.getWidth())
+                                 .withTrimmedBottom (18);
+
+    g.setFont (juce::FontOptions (9.0f));
+
+    for (float db : marks)
+    {
+        const float y = yForDb (db);
+        if (y < (float) scale.getY() || y > (float) scale.getBottom())
+            continue;
+
+        const bool major = juce::approximatelyEqual (db, 0.0f);
+
+        g.setColour (kText.withAlpha (major ? 0.55f : 0.28f));
+        g.drawLine ((float) scale.getX() + 1.0f, y,
+                    (float) scale.getX() + (major ? 9.0f : 6.0f), y, major ? 1.4f : 1.0f);
+
+        g.setColour (kText.withAlpha (major ? 0.7f : 0.42f));
+        const auto text = db <= -59.5f ? juce::String::charToString ((juce::juce_wchar) 0x221E)
+                                       : juce::String ((int) db);
+        g.drawText (text, scale.getX() + 12, (int) y - 6, scale.getWidth() - 12, 12,
+                    juce::Justification::centredLeft);
+    }
 }
 
 //==============================================================================
 ShellSpaceEditor::ShellSpaceEditor (ShellSpaceProcessor& p)
     : AudioProcessorEditor (&p), proc (p),
-      bodyTune  (p.apvts, "bodyTune",   "TUNE"),
-      bodyLevel (p.apvts, "bodyLevel",  "LEVEL"),
-      spacePre  (p.apvts, "spacePre",   "PREDELAY"),
-      spaceLevel(p.apvts, "spaceLevel", "LEVEL"),
-      hpf       (p.apvts, "hpf",        "WET HPF"),
-      dry       (p.apvts, "dry",        "DRY"),
-      out       (p.apvts, "out",        "OUTPUT")
+      bodyTune  (p.apvts, "bodyTune", "TUNE"),
+      spacePre  (p.apvts, "spacePre", "PREDELAY"),
+      hpf       (p.apvts, "hpf",      "WET HPF"),
+      bodyLevel (p.apvts, "bodyLevel",  { 12.0f, 6.0f, 0.0f, -6.0f, -12.0f, -24.0f, -40.0f, -60.0f }),
+      spaceLevel(p.apvts, "spaceLevel", { 12.0f, 6.0f, 0.0f, -6.0f, -12.0f, -24.0f, -40.0f, -60.0f }),
+      dry       (p.apvts, "dry",        {  6.0f, 0.0f, -6.0f, -12.0f, -24.0f, -40.0f, -60.0f }),
+      out       (p.apvts, "out",        { 24.0f, 12.0f, 6.0f, 0.0f, -6.0f, -12.0f, -24.0f })
 {
     auto styleBox = [] (juce::ComboBox& box)
     {
@@ -71,7 +159,6 @@ ShellSpaceEditor::ShellSpaceEditor (ShellSpaceProcessor& p)
         box.setColour (juce::ComboBox::outlineColourId, kText.withAlpha (0.25f));
     };
 
-    // ---- プリセット --------------------------------------------------------
     for (int i = 0; i < proc.getNumPrograms(); ++i)
         presetBox.addItem (proc.getProgramName (i), i + 1);
 
@@ -85,7 +172,6 @@ ShellSpaceEditor::ShellSpaceEditor (ShellSpaceProcessor& p)
     styleBox (presetBox);
     addAndMakeVisible (presetBox);
 
-    // ---- 音源/ホール選択 ---------------------------------------------------
     // ComboBoxAttachment は項目を作ってくれない。先に入れてからアタッチする。
     auto setUpChoice = [&p, &styleBox] (juce::ComboBox& box, const juce::String& paramID,
                                         std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment>& att)
@@ -103,7 +189,6 @@ ShellSpaceEditor::ShellSpaceEditor (ShellSpaceProcessor& p)
     setUpChoice (bodyType,  "bodyType",  bodyTypeAtt);
     setUpChoice (spaceType, "spaceType", spaceTypeAtt);
 
-    // ---- IR差し替え --------------------------------------------------------
     for (auto* b : { &bodyIRButton, &spaceIRButton })
     {
         b->setColour (juce::TextButton::buttonColourId, kBack);
@@ -113,7 +198,6 @@ ShellSpaceEditor::ShellSpaceEditor (ShellSpaceProcessor& p)
     bodyIRButton .onClick = [this] { showIRMenu (true,  bodyIRButton); };
     spaceIRButton.onClick = [this] { showIRMenu (false, spaceIRButton); };
 
-    // ---- True Stereo -------------------------------------------------------
     trueStereoToggle.setColour (juce::ToggleButton::textColourId, kText.withAlpha (0.8f));
     trueStereoToggle.setColour (juce::ToggleButton::tickColourId, kAccent);
     trueStereoToggle.setColour (juce::ToggleButton::tickDisabledColourId, kText.withAlpha (0.4f));
@@ -121,19 +205,41 @@ ShellSpaceEditor::ShellSpaceEditor (ShellSpaceProcessor& p)
     trueStereoAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
                         p.apvts, "trueStereo", trueStereoToggle);
 
-    // ---- 状態表示 ----------------------------------------------------------
+    // MUTE / BYPASS。押した状態が赤く残るので、切ってあることが一目で分かる
+    {
+        const char* ids[]   = { "bodyMute", "spaceMute", "dryMute", "bypass" };
+        const char* texts[] = { "MUTE", "MUTE", "MUTE", "BYPASS" };
+
+        for (int i = 0; i < 4; ++i)
+        {
+            auto& b = muteButtons[i];
+            b.setButtonText (texts[i]);
+            b.setClickingTogglesState (true);
+            b.setColour (juce::TextButton::buttonColourId, kBack);
+            b.setColour (juce::TextButton::buttonOnColourId, kMuteOn);
+            b.setColour (juce::TextButton::textColourOffId, kText.withAlpha (0.65f));
+            b.setColour (juce::TextButton::textColourOnId, juce::Colours::white);
+            addAndMakeVisible (b);
+
+            muteAtts[i] = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
+                              p.apvts, ids[i], b);
+        }
+    }
+
     statusLabel.setJustificationType (juce::Justification::centredLeft);
     statusLabel.setFont (juce::FontOptions (10.5f));
     statusLabel.setColour (juce::Label::textColourId, kText.withAlpha (0.55f));
     addAndMakeVisible (statusLabel);
 
-    for (auto* k : { &bodyTune, &bodyLevel, &spacePre, &spaceLevel, &hpf, &dry, &out })
+    for (auto* k : { &bodyTune, &spacePre, &hpf })
         addAndMakeVisible (k);
+    for (auto* f : { &bodyLevel, &spaceLevel, &dry, &out })
+        addAndMakeVisible (f);
 
     refreshIRLabels();
     startTimerHz (4);
 
-    setSize (ShellSpaceProcessor::kEditorWidth, ShellSpaceProcessor::kEditorHeight);
+    setSize (kEditorW, kEditorH);
 }
 
 //==============================================================================
@@ -181,8 +287,8 @@ void ShellSpaceEditor::refreshIRLabels()
             return u8 ("IR: 内蔵");
 
         auto name = f.getFileNameWithoutExtension();
-        if (name.length() > 12)
-            name = name.substring (0, 11) + juce::String::charToString ((juce::juce_wchar) 0x2026);
+        if (name.length() > 8)
+            name = name.substring (0, 7) + juce::String::charToString ((juce::juce_wchar) 0x2026);
 
         return "IR: " + name;
     };
@@ -193,7 +299,6 @@ void ShellSpaceEditor::refreshIRLabels()
 
 void ShellSpaceEditor::timerCallback()
 {
-    // プリセットはホスト側からも変わるので追随させる
     const int program = proc.getCurrentProgram();
     if (program != lastProgram)
     {
@@ -202,12 +307,11 @@ void ShellSpaceEditor::timerCallback()
         refreshIRLabels();
     }
 
-    // IRの読み込み結果を出す。黙って内蔵に戻ると原因が分からないため。
     const auto bodyErr  = proc.getIRError (true);
     const auto spaceErr = proc.getIRError (false);
 
     juce::String status;
-    if (bodyErr .isNotEmpty()) status = "BODY: "  + bodyErr;
+    if (bodyErr .isNotEmpty())      status = "BODY: "  + bodyErr;
     else if (spaceErr.isNotEmpty()) status = "SPACE: " + spaceErr;
 
     if (status != lastStatus)
@@ -221,12 +325,12 @@ void ShellSpaceEditor::timerCallback()
 }
 
 //==============================================================================
-juce::Rectangle<int> ShellSpaceEditor::sectionBounds (int index) const
+juce::Rectangle<int> ShellSpaceEditor::columnBounds (int index) const
 {
-    return { kPad,
-             kHeader + index * (kSectionH + kGap),
-             getWidth() - kPad * 2,
-             kSectionH };
+    return { kPad + index * (kColW + kColGap),
+             kHeader,
+             kColW,
+             kTopH + kMuteH + kFaderH + kNameH };
 }
 
 void ShellSpaceEditor::paint (juce::Graphics& g)
@@ -242,19 +346,27 @@ void ShellSpaceEditor::paint (juce::Graphics& g)
     g.drawText ("convolution / body + hall", kPad, 6, getWidth() - kPad * 2, 14,
                 juce::Justification::right);
 
-    const char* titles[] = { "BODY", "SPACE", "OUTPUT" };
+    const char* names[] = { "BODY", "SPACE", "DRY", "MASTER" };
 
-    for (int i = 0; i < 3; ++i)
+    for (int i = 0; i < kNumCols; ++i)
     {
-        const auto area = sectionBounds (i);
+        auto col = columnBounds (i);
 
         g.setColour (kPanel);
-        g.fillRoundedRectangle (area.toFloat(), 6.0f);
+        g.fillRoundedRectangle (col.toFloat(), 5.0f);
 
-        g.setColour (kAccent.withAlpha (0.85f));
-        g.setFont (juce::FontOptions (10.0f, juce::Font::bold));
-        g.drawText (titles[i], area.getX() + kInnerPad, area.getY() + 6, 140, 12,
-                    juce::Justification::left);
+        // 一番下の名前帯。チャンネルストリップの見出し
+        auto strip = col.removeFromBottom (kNameH);
+        juce::Path p;
+        p.addRoundedRectangle ((float) strip.getX(), (float) strip.getY(),
+                               (float) strip.getWidth(), (float) strip.getHeight(),
+                               5.0f, 5.0f, false, false, true, true);
+        g.setColour (kStrip);
+        g.fillPath (p);
+
+        g.setColour (i == kNumCols - 1 ? kAccent : kText.withAlpha (0.8f));
+        g.setFont (juce::FontOptions (11.0f, juce::Font::bold));
+        g.drawText (names[i], strip, juce::Justification::centred);
     }
 }
 
@@ -262,48 +374,50 @@ void ShellSpaceEditor::resized()
 {
     presetBox.setBounds (kPad, 26, getWidth() - kPad * 2, kComboH);
 
-    // セクション0(BODY) と 1(SPACE): [選択 + IRボタン(+True Stereo)] [ノブ] [ノブ]
-    auto layoutWithChoice = [this] (int index, juce::ComboBox& box, juce::Button& irButton,
-                                    juce::Button* toggle, Knob& a, Knob& b)
+    auto columnTop = [this] (int index)
     {
-        auto row = sectionBounds (index).reduced (kInnerPad, 0);
-        row.removeFromTop (kTitleH);
-        row = row.withHeight (kKnobH);
-
-        auto left = row.removeFromLeft (kComboW);
-        const int stackH = kComboH + 4 + kSmallH + (toggle != nullptr ? 4 + kSmallH : 0);
-        left = left.withSizeKeepingCentre (kComboW, stackH);
-
-        box.setBounds (left.removeFromTop (kComboH));
-        left.removeFromTop (4);
-        irButton.setBounds (left.removeFromTop (kSmallH));
-
-        if (toggle != nullptr)
-        {
-            left.removeFromTop (4);
-            toggle->setBounds (left.removeFromTop (kSmallH));
-        }
-
-        row.removeFromLeft (kGap);
-        a.setBounds (row.removeFromLeft (kKnobW));
-        row.removeFromLeft (kKnobGap);
-        b.setBounds (row.removeFromLeft (kKnobW));
+        return columnBounds (index).withHeight (kTopH).reduced (kInner, 0)
+                                   .withTrimmedTop (8);
     };
 
-    layoutWithChoice (0, bodyType,  bodyIRButton,  nullptr,           bodyTune, bodyLevel);
-    layoutWithChoice (1, spaceType, spaceIRButton, &trueStereoToggle, spacePre, spaceLevel);
-
-    // セクション2(OUTPUT): ノブ3個を横並びで中央寄せ
-    auto row = sectionBounds (2).reduced (kInnerPad, 0);
-    row.removeFromTop (kTitleH);
-    row = row.withHeight (kKnobH);
-    row = row.withSizeKeepingCentre (kKnobW * 3 + kKnobGap * 2, kKnobH);
-
-    for (auto* k : { &hpf, &dry, &out })
+    // 行の高さを固定して、どの列でもノブが同じ大きさになるようにする。
+    // 使わない行も場所だけ空けておかないと、行数の少ない列のノブだけ巨大になる。
+    auto layoutColumn = [this, &columnTop] (int index, juce::ComboBox* box,
+                                            juce::Button* irButton, juce::Button* toggle,
+                                            Knob& knob)
     {
-        k->setBounds (row.removeFromLeft (kKnobW));
-        row.removeFromLeft (kKnobGap);
+        auto r = columnTop (index);
+
+        auto row = [&r] (int h, int gap) { auto a = r.removeFromTop (h); r.removeFromTop (gap); return a; };
+
+        auto comboArea  = row (kComboH, 4);
+        auto irArea     = row (kSmallH, 2);
+        auto toggleArea = row (kSmallH, 4);
+
+        if (box       != nullptr) box      ->setBounds (comboArea);
+        if (irButton  != nullptr) irButton ->setBounds (irArea);
+        if (toggle    != nullptr) toggle   ->setBounds (toggleArea);
+
+        knob.setBounds (r);
+    };
+
+    layoutColumn (0, &bodyType,  &bodyIRButton,  nullptr,           bodyTune);
+    layoutColumn (1, &spaceType, &spaceIRButton, &trueStereoToggle, spacePre);
+    layoutColumn (3, nullptr,    nullptr,        nullptr,           hpf);
+
+    // ---- MUTE / BYPASS とフェーダー -----------------------------------------
+    Fader* faders[] = { &bodyLevel, &spaceLevel, &dry, &out };
+    for (int i = 0; i < kNumCols; ++i)
+    {
+        auto col = columnBounds (i);
+        col.removeFromBottom (kNameH);
+        col.removeFromTop (kTopH);
+
+        auto mute = col.removeFromTop (kMuteH).reduced (kInner, 3);
+        muteButtons[i].setBounds (mute);
+
+        faders[i]->setBounds (col.reduced (kInner, 4));
     }
 
-    statusLabel.setBounds (kPad, getHeight() - kStatusH, getWidth() - kPad * 2, kStatusH - 6);
+    statusLabel.setBounds (kPad, getHeight() - kStatusH - 2, getWidth() - kPad * 2, kStatusH);
 }
