@@ -1,0 +1,38 @@
+name: Sound and UX feedback
+description: Suggest a tonal, preset, kit, cabinet, or workflow improvement
+title: "[Feedback] "
+labels: [feedback]
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Drum body or shell material
+        - Yamaha kit model
+        - Marshall-style 4x12 cabinet
+        - Ampeg-style 8x10 cabinet
+        - Controls and workflow
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Listening context
+      description: Note the source, DAW, sample rate, monitors/headphones, and the selected settings.
+    validations:
+      required: true
+  - type: textarea
+    id: observation
+    attributes:
+      label: What you hear or experience
+    validations:
+      required: true
+  - type: textarea
+    id: change
+    attributes:
+      label: Suggested change
+      description: Comparisons or short audio examples are welcome.
+    validations:
+      required: true

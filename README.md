@@ -1,8 +1,9 @@
 # ShellSpace
 
-ドラムの**胴鳴り**とホールの**残響**を並列に足すコンボリューション VST3 プラグイン。
+ドラムの**胴鳴り**、楽器キャビネット、ホールの**残響**を扱うコンボリューション・プラグイン。
 
-- 形式: **VST3 / Windows x64**
+- 形式: **VST3 / Windows x64・macOS universal、Audio Unit / macOS universal**
+- 最新機能版: **v0.4.0**
 - フレームワーク: [JUCE](https://juce.com/) 8
 - Visual C++ 再頒布可能パッケージは**不要**（CRT を静的リンク済み）
 
@@ -23,7 +24,9 @@ Wet HPF は **WET 側だけ**に掛かるので、原音の低域を削らずに
 
 | | |
 |---|---|
-| **BODY** | キック / スネア / タムの胴鳴り。**Tune** は IR を時間軸ごと伸縮させるので、実機のチューニングと同じ挙動（減衰も同じ比率で変わる） |
+| **BODY** | キック / スネア / タム、Marshall 1960A型4x12、Ampeg SVT-810E型8x10。**Tune** は IR を時間軸ごと伸縮 |
+| **Shell Material** | Maple / Birch / Mahogany / Oak |
+| **Kit Model** | Yamaha Recording / Live / Stage / Tour Customの公開仕様を抽象化した合成キャラクター |
 | **SPACE** | 天井の高いオペラハウス型ホール。Full / ドラム用（低域を締めた版）。**True Stereo**（4ch IR）対応 |
 | **IR 差し替え** | 各セクションから自分の wav を読み込める。パスはプロジェクトに保存される |
 | **プリセット** | 7 種 |
@@ -32,7 +35,14 @@ Level 系は既定が **-60dB（＝切）**。挿しただけでは音が変わ�
 
 ## インストール
 
-**手順を1つでも飛ばすと DAW に出てこない。**
+### 配布パッケージ
+
+- Windows: `ShellSpace-0.4.0-Setup.exe`、または`ShellSpace-0.4.0-Windows-x64.zip`
+- macOS: VST3とAUを選べる`ShellSpace-0.4.0-macOS.pkg`、またはフォーマット別ZIP
+
+未署名ビルドのため、OSのセキュリティ確認が表示される場合がある。
+
+### WindowsでZIPを使う場合
 
 1. **zip のブロックを解除してから展開する。** ネットから落とした zip は Windows が
    ブロック扱いにすることがあり、そのまま展開すると中の DLL が読み込めない。
@@ -62,6 +72,13 @@ Level 系は既定が **-60dB（＝切）**。挿しただけでは音が変わ�
    Cubase がブロックリストに入れ、以後どれだけ再スキャンしても無視する。
    `スタジオ > VST プラグインマネージャー > Blocklist` から再有効化する。
 
+### macOSでZIPを使う場合
+
+- VST3: `/Library/Audio/Plug-Ins/VST3/`
+- Audio Unit: `/Library/Audio/Plug-Ins/Components/`
+
+配置後にDAWを再起動し、必要ならプラグインを再スキャンする。
+
 ### 診断スクリプト
 
 配置・構造・ブロック状態を自動で調べる。何も書き換えない。
@@ -87,6 +104,10 @@ py -3 IR/verify_ir.py IR      # 実測検証（RT60・ピーク・モード・ch
 
 > **ホール IR は現地で実測したものではない。**
 > 「馬蹄形で天井が高いホールはどう鳴るか」を設計して合成したもの。
+
+Yamaha各キットとMarshall/Ampegキャビもメーカー実測IRの複製ではなく、公開されている
+材・シェル構造・スピーカー構成・帯域を合成IRへ翻訳したモデル。根拠と数値は
+[IR/README.md](IR/README.md)に記載している。
 
 ## ビルド
 
@@ -122,8 +143,10 @@ cd ShellSpace
 | 項目 | 実測 |
 |---|---|
 | キック胴鳴りの基音 | 49.8 Hz |
-| Tune +12 半音での基音 | 98.1 Hz（比 1.971 / 理論値 2.0） |
-| Tune +12 半音での減衰 | ×0.500 |
+| Tune +12 半音での基音 | 99.6 Hz（比 2.000） |
+| Tune +12 半音での減衰 | ×0.591 |
+| Mahogany / Tour Custom キック | 基音46.9 Hz、−20dB減衰166.3 ms |
+| Marshall型 / Ampeg型キャビ | 両方出音し、主成分帯と特性差を確認 |
 | Predelay 40ms の立ち上がり | 43.4 ms |
 | ホールの残響（−20dB まで） | 410.9 ms |
 | 追加レイテンシ | 0（立ち上がり 0.02ms） |
@@ -132,6 +155,13 @@ cd ShellSpace
 | pluginval strictness 10 | 6 シードすべて SUCCESS |
 
 **未検証**: DAW（Cubase 等）での実動作、高 DPI 表示、CPU 負荷、オートメーション、長時間動作。
+
+## フィードバック
+
+- [不具合報告](../../issues/new?template=bug_report.yml): OS、DAW、VST3/AU、再現手順
+- [音・UXの提案](../../issues/new?template=sound_feedback.yml): BODY、胴材、キット、キャビ、試聴条件
+
+比較音源やスクリーンショットを添えると調整へ反映しやすい。
 
 ## 既知の制約
 

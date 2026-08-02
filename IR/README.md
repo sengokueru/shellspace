@@ -23,9 +23,9 @@ py -3 IR/verify_ir.py IR      # 実測検証（RT60・ピーク・モード・ch
 | `Hall_Yokosuka-type_Full_Stereo.wav` | 2 | 2.90s | モノ素材用・CPU節約用 |
 | `Hall_Yokosuka-type_Drum_TrueStereo.wav` | 4 | 2.90s | **ドラム用。** 低域を締めて溜まりを防いだ版 |
 | `Hall_Yokosuka-type_Drum_Stereo.wav` | 2 | 2.90s | 同上・2ch |
-| `Shell_Kick_body.wav` | 2 | 1.10s | 22"キック胴鳴り（残響のみ） |
-| `Shell_Snare_body.wav` | 2 | 0.75s | 14"スネア胴鳴り＋スナッピー |
-| `Shell_Tom_body.wav` | 2 | 1.30s | 12-13"タム胴鳴り |
+| `Shell_<Kind>_<Material>_<Kit>.wav` | 2 | 0.75〜1.30s | 3種×4胴材×4キット＝48本 |
+| `Cab_Marshall1960A_4x12.wav` | 2 | 85ms | G12T-75×4の公開仕様を基にした合成ギターキャビ |
+| `Cab_AmpegSVT810E_8x10.wav` | 2 | 85ms | 密閉8×10の公開仕様を基にした合成ベースキャビ |
 
 4chファイルは **LL, LR, RL, RR** の順（REVerenceが要求する唯一の並び）。
 ステレオトラックに挿して4ch IRを読むと自動でTrue Stereoになる。
@@ -83,6 +83,10 @@ Drum版は中域を保ったまま低域だけ約0.4秒短い。キックが溜�
 
 **残響成分のみ**（頭に直接音なし）。L/R完全同一のデュアルモノなのでモノ互換で位相が崩れない。
 
+ファイル名の `Material` は `Maple / Birch / Mahogany / Oak`、`Kit` は
+`RecordingCustom / LiveCustom / StageCustom / TourCustom`。胴材とキット構造は独立に選べるため、
+実在仕様どおりの組合せだけでなく音作り用の交差組合せも生成する。
+
 | ファイル | RT60 | 実測モード(Hz) | 特徴 |
 |---|---|---|---|
 | Kick | 0.64s | 36 / 49 / 62 / 78 / 96 / 132 | ピッチが落ちながら伸びる＝「ボゥン」。30HzでHPF済み |
@@ -103,6 +107,20 @@ Sizeを縮めると減衰も同じ比率で短くなる（実機のチューニ�
 ### 使い方
 - **センドで戻して混ぜる。** インサートで100%通すより量を制御しやすい。
 - 溜まりすぎたら、IRではなく**戻りにEQ**を挿す。犯人はキック60Hz付近、タム135Hz付近。
+
+## キャビネット（Cab_*）
+
+最小位相の合成IR。アンプ／歪みそのものは含まず、スピーカー＋箱の周波数制限を担当する。
+
+| IR | 生成後の実測（1kHz基準） |
+|---|---|
+| Marshall 1960A型 | 80Hz −5.7dB / 3kHz +1.7dB / 5kHz −12.4dB / 8kHz −43.6dB |
+| Ampeg SVT-810E型 | 40Hz −12.9dB / 58Hz −4.7dB / 110Hz +1.1dB / 5kHz −4.7dB |
+
+一次情報: [Marshall 1960A](https://www.marshall.com/us/en/product/1960a-4x12-angled-cabinet)、
+[Celestion G12T-75](https://celestion.com/product/g12t-75/)、
+[Ampeg SVT-810E](https://ampeg.com/products/classic/cabs.html)、
+[Ampeg仕様書](https://ampeg.com/data/6/0a020a4112e10660efb652b000/application/pdf/Owner%E2%80%99s%20Manual%20-%20English%20.pdf)。
 
 ---
 

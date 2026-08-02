@@ -7,7 +7,7 @@ if(APPLE)
     set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "")
 endif()
 
-project(ShellSpace VERSION 0.3.0)
+project(ShellSpace VERSION 0.4.0)
 
 if(MSVC)
     # MSVCは既定でソースをシステムコードページ(日本語環境ならCP932)として読む。
@@ -43,13 +43,20 @@ endif()
 # 埋め込むIR。先に `python IR/make_ir.py IR` を実行して wav を生成しておくこと
 set(IR_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../IR")
 set(IR_FILES
-    "${IR_DIR}/Shell_Kick_body.wav"
-    "${IR_DIR}/Shell_Snare_body.wav"
-    "${IR_DIR}/Shell_Tom_body.wav"
+    "${IR_DIR}/Cab_Marshall1960A_4x12.wav"
+    "${IR_DIR}/Cab_AmpegSVT810E_8x10.wav"
     "${IR_DIR}/Hall_Yokosuka-type_Full_Stereo.wav"
     "${IR_DIR}/Hall_Yokosuka-type_Drum_Stereo.wav"
     "${IR_DIR}/Hall_Yokosuka-type_Full_TrueStereo.wav"
     "${IR_DIR}/Hall_Yokosuka-type_Drum_TrueStereo.wav")
+
+foreach(kind Kick Snare Tom)
+    foreach(material Maple Birch Mahogany Oak)
+        foreach(kit RecordingCustom LiveCustom StageCustom TourCustom)
+            list(APPEND IR_FILES "${IR_DIR}/Shell_${kind}_${material}_${kit}.wav")
+        endforeach()
+    endforeach()
+endforeach()
 
 foreach(f ${IR_FILES})
     if(NOT EXISTS ${f})

@@ -1,16 +1,18 @@
 # -*- coding: utf-8 -*-
-"""IR generator — Cubase REVerence / 生ドラム・ドラム音源向け。
+"""IR generator — ShellSpace / Cubase REVerence向け。
 
 出力（48kHz / 24bit）:
   Hall_Yokosuka-type_Full_TrueStereo.wav   4ch LL,LR,RL,RR  ホール本来の低域
   Hall_Yokosuka-type_Full_Stereo.wav       2ch              同上・2ch版
   Hall_Yokosuka-type_Drum_TrueStereo.wav   4ch LL,LR,RL,RR  低域を締めたドラム用
   Hall_Yokosuka-type_Drum_Stereo.wav       2ch              同上・2ch版
-  Shell_Kick_body.wav / Shell_Snare_body.wav / Shell_Tom_body.wav   2ch
+  Shell_<Kind>_<Material>_<YamahaKit>.wav     2ch  胴材×キット特性
+  Cab_Marshall1960A_4x12.wav                  2ch  ギターキャビ
+  Cab_AmpegSVT810E_8x10.wav                   2ch  ベースキャビ
 
 重要: ホールIRに直接音は入っていない（センド/FXトラック前提）。
 """
-import numpy as np, wave, os, sys
+import numpy as np, wave, os, sys, zlib
 
 # 日本語を出すので標準出力をUTF-8に固定する。
 # これが無いと、コンソールのコードページ次第で UnicodeEncodeError で落ちる
@@ -203,12 +205,74 @@ SHELLS = {
 }
 
 
-def shell(kind):
+# 胴材による傾向。基準(Maple)に対する倍率で表す。
+#   f       : 全モードの周波数倍率（胴の厚み・硬さの差）
+#   ampLow  / ampHigh : 基音側 / 高次側の音量倍率
+#   decLow  / decHigh : 基音側 / 高次側の減衰時間倍率
+#   noise   : 胴の鳴きノイズ成分の倍率
+#
+# メイプル … 素直で基準。低域から高域までまんべんなく出る
+# バーチ   … 低域が締まりアタック帯が張り出す。減衰は短め
+# マホガニー… 低域が太く高次倍音が落ちる。低域はよく伸びる
+MATERIALS = {
+    'Maple':    dict(f=1.00, ampLow=1.00, ampHigh=1.00, decLow=1.00, decHigh=1.00, noise=1.00),
+    'Birch':    dict(f=1.03, ampLow=0.78, ampHigh=1.40, decLow=0.82, decHigh=0.95, noise=1.20),
+    'Mahogany': dict(f=0.96, ampLow=1.28, ampHigh=0.62, decLow=1.18, decHigh=0.78, noise=0.85),
+    'Oak':      dict(f=1.05, ampLow=0.94, ampHigh=1.32, decLow=0.94, decHigh=1.02, noise=1.28),
+}
+
+# Yamaha各シリーズの公式な材・厚み・ラグ・エッジ・ヘッドの説明を、
+# 基準胴のモード列へ掛ける「キャラクター」として抽象化したもの。
+# 実測IRの複製ではなく、公開仕様から推定した合成モデル。
+YAMAHA_KITS = {
+    # 6ply Birch / weighted high-tension lug / 30-degree edge:
+    # 芯の低域、明瞭な発音、不要共振を抑えた録音向けのまとまり。
+    'RecordingCustom': dict(f=0.995, ampLow=1.10, ampHigh=1.03,
+                            decLow=1.03, decHigh=0.82, noise=0.76),
+    # 7ply Oak/Phenolic / 2.3mm hoop / YESS III:
+    # 投射、強いアタック、大きな低域、自由なサステイン。
+    'LiveCustom':      dict(f=1.018, ampLow=1.18, ampHigh=1.22,
+                            decLow=1.04, decHigh=1.08, noise=1.24),
+    # 6ply 7.2mm Birch / 1.5mm hoop:
+    # 短い減衰、速いアタック、タイトな分離。
+    'StageCustom':     dict(f=1.028, ampLow=0.86, ampHigh=1.12,
+                            decLow=0.78, decHigh=0.84, noise=0.92),
+    # 6ply 5.6mm Maple / 2.3mm inverse hoop:
+    # 暖かく明るい、比較的開いた共鳴。
+    'TourCustom':      dict(f=0.990, ampLow=1.13, ampHigh=1.07,
+                            decLow=1.12, decHigh=1.15, noise=0.90),
+}
+
+
+def apply_character(modes, character):
+    """モード列へ低次→高次のキャラクター倍率を線形に掛ける。"""
+    k = character
+    n = max(1, len(modes) - 1)
+    out = []
+    for i, (f0, a, dec, glide) in enumerate(modes):
+        t = i / n
+        amp = a   * (k['ampLow'] + (k['ampHigh'] - k['ampLow']) * t)
+        d   = dec * (k['decLow'] + (k['decHigh'] - k['decLow']) * t)
+        out.append((f0 * k['f'], amp, d, glide))
+    return out
+
+
+def stable_seed(text):
+    """Pythonのランダム化hash()に依存せず、再生成で同じIRを得る。"""
+    return zlib.crc32(text.encode('ascii')) & 0xffffffff
+
+
+def shell(kind, material, kit):
     dur, modes, noises, hp = SHELLS[kind]
+    modes = apply_character(modes, MATERIALS[material])
+    modes = apply_character(modes, YAMAHA_KITS[kit])
+    noise_mult = MATERIALS[material]['noise'] * YAMAHA_KITS[kit]['noise']
+    noises = [(fc, bw, amp * noise_mult, dec) for fc, bw, amp, dec in noises]
     n = int(SR * dur)
     t = np.arange(n) / SR
-    y = modal(n, modes, seed=abs(hash(kind)) % 10000)
-    rng = np.random.default_rng(abs(hash(kind)) % 9999)
+    seed = stable_seed(f'{kind}:{material}:{kit}')
+    y = modal(n, modes, seed=seed)
+    rng = np.random.default_rng(seed ^ 0x5a17c9e3)
     f = np.fft.rfftfreq(n, 1 / SR)
     for fc, bw, amp, dec in noises:
         nz = np.fft.irfft(np.fft.rfft(rng.standard_normal(n)) *
@@ -221,6 +285,51 @@ def shell(kind):
     return np.stack([y, y], axis=1)   # dual mono（位相を崩さない）
 
 
+# ========================================================== GUITAR/BASS CABS
+def minimum_phase_cab(anchors, duration=0.085):
+    """周波数/dBアンカーから因果的な最小位相キャビネットIRを作る。"""
+    n = 1
+    while n < int(SR * duration):
+        n *= 2
+
+    f = np.fft.rfftfreq(n, 1 / SR)
+    af = np.array([a[0] for a in anchors], dtype=float)
+    adb = np.array([a[1] for a in anchors], dtype=float)
+    db = np.interp(np.log2(np.maximum(f, af[0])), np.log2(af), adb)
+    log_mag = np.log(np.maximum(10 ** (db / 20.0), 1e-8))
+
+    cep = np.fft.irfft(log_mag, n)
+    min_cep = np.zeros(n)
+    min_cep[0] = cep[0]
+    min_cep[1:n // 2] = 2.0 * cep[1:n // 2]
+    min_cep[n // 2] = cep[n // 2]
+    ir = np.fft.irfft(np.exp(np.fft.rfft(min_cep)), n)
+
+    # 末尾の循環成分を完全に落とし、左右同一で位相安全にする。
+    fade_start = int(n * 0.72)
+    ir[fade_start:] *= np.linspace(1.0, 0.0, n - fade_start)
+    return np.stack([ir, ir], axis=1)
+
+
+# Marshall 1960A: Celestion G12T-75 x4。公式の80Hz–5kHz / Fs=85Hzと
+# 「tight low end / aggressive mids / softened top」を周波数アンカー化。
+MARSHALL_1960A = [
+    (20, -55), (40, -35), (60, -18), (80, -4), (85, 0),
+    (120, 2), (250, 0), (500, -2), (900, 2), (1500, 4),
+    (2200, 0), (3200, 5), (4200, -3), (5000, -10),
+    (7000, -35), (12000, -60), (24000, -80),
+]
+
+# Ampeg SVT-810E: 密閉2発×4室のInfinite Baffle。
+# 公式の58Hz–5kHz ±3dB / 40Hz -10dBと「punchy, round, rapid transient」を反映。
+AMPEG_SVT810E = [
+    (20, -45), (30, -24), (40, -10), (58, -3), (75, 1),
+    (110, 3), (180, 1), (350, -1), (700, 1), (1200, 2),
+    (2200, 0), (3500, -1), (5000, -3), (6500, -18),
+    (9000, -45), (24000, -80),
+]
+
+
 # ==================================================================== run
 def norm(x, peak_db=-1.0):
     return x / np.max(np.abs(x)) * (10 ** (peak_db / 20))
@@ -231,10 +340,15 @@ jobs = {
     'Hall_Yokosuka-type_Full_Stereo.wav':     hall_pair(0, 20260802, 1.00),
     'Hall_Yokosuka-type_Drum_TrueStereo.wav': hall_true_stereo(0.80, 20260803),
     'Hall_Yokosuka-type_Drum_Stereo.wav':     hall_pair(0, 20260803, 0.80),
-    'Shell_Kick_body.wav':  shell('kick'),
-    'Shell_Snare_body.wav': shell('snare'),
-    'Shell_Tom_body.wav':   shell('tom'),
+    'Cab_Marshall1960A_4x12.wav': minimum_phase_cab(MARSHALL_1960A),
+    'Cab_AmpegSVT810E_8x10.wav':  minimum_phase_cab(AMPEG_SVT810E),
 }
+for kind in SHELLS:
+    for material in MATERIALS:
+        for kit in YAMAHA_KITS:
+            name = f'Shell_{kind.capitalize()}_{material}_{kit}.wav'
+            jobs[name] = shell(kind, material, kit)
+
 for name, ir in jobs.items():
     write_wav24(os.path.join(OUT, name), norm(ir))
     print(f'wrote {name}  {ir.shape[1]}ch {ir.shape[0]/SR:.2f}s')

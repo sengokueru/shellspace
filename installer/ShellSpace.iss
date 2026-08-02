@@ -13,8 +13,11 @@
   #define SourceDir "..\dist"
 #endif
 
+#ifndef AppVersion
+  #define AppVersion "0.4.0"
+#endif
+
 #define AppName    "ShellSpace"
-#define AppVersion "0.3.0"
 #define Publisher  "Yokosuka"
 
 [Setup]
@@ -22,7 +25,7 @@ AppId={{7C4E0A1E-2B6D-4C39-9A55-5348454C4C53}
 AppName={#AppName}
 AppVersion={#AppVersion}
 AppPublisher={#Publisher}
-AppSupportURL=https://github.com/sengokueru/shellspace
+AppSupportURL=https://github.com/sengokueru/shellspace/issues
 ; 権限に応じて入れ先を変える。固定値にすると、ユーザーモードでも
 ; Program Files を作りにいってアクセス拒否で失敗する。
 DefaultDirName={code:GetVst3Dir}
@@ -76,7 +79,7 @@ Source: "{#SourceDir}\IR\*.wav"; DestDir: "{code:GetDocsDir}\ShellSpace IR"; \
   Flags: ignoreversion; Components: ir
 
 ; --- 説明・診断ツール ---
-Source: "{#SourceDir}\README_review_ja.md";  DestDir: "{code:GetDocsDir}\ShellSpace IR"; Flags: ignoreversion; Components: ir
+Source: "{#SourceDir}\README.md";            DestDir: "{code:GetDocsDir}\ShellSpace IR"; Flags: ignoreversion; Components: ir
 Source: "{#SourceDir}\check-install.ps1";    DestDir: "{code:GetDocsDir}\ShellSpace IR"; Flags: ignoreversion; Components: ir
 
 [Icons]

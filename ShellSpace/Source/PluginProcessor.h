@@ -62,7 +62,7 @@ public:
     juce::AudioProcessorValueTreeState apvts;
 
     static constexpr int kEditorWidth  = 448;
-    static constexpr int kEditorHeight = 518;
+    static constexpr int kEditorHeight = 550;
 
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();

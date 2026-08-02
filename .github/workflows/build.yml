@@ -1,13 +1,15 @@
 name: build
 
-# Windows と macOS のバイナリを作る。
-# 開発機が Windows なので、macOS 版はこのランナーが唯一の生成手段。
 on:
   push:
     branches: [main]
     tags: ['v*']
   pull_request:
   workflow_dispatch:
+
+env:
+  VERSION: 0.4.0
+  PLUGINVAL_VERSION: v1.0.4
 
 jobs:
   build:
@@ -18,7 +20,7 @@ jobs:
       matrix:
         include:
           - os: macos-latest
-            label: macOS (universal)
+            label: macOS universal
             slug: macos
           - os: windows-latest
             label: Windows x64
@@ -31,80 +33,117 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: numpy を入れる
-        run: python -m pip install --upgrade pip numpy
+      - name: Generate and verify IR files
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip numpy
+          python IR/make_ir.py IR
+          python IR/verify_ir.py IR
 
-      - name: IR を生成する
-        run: python IR/make_ir.py IR
-
-      - name: IR を検証する
-        run: python IR/verify_ir.py IR
-
-      # JUCE は FetchContent で取る。毎回クローンすると遅いのでキャッシュする
-      - name: JUCE をキャッシュ
+      - name: Cache JUCE
         uses: actions/cache@v4
         with:
           path: ShellSpace/build/_deps
           key: juce-${{ matrix.slug }}-7dda739b9be09f1dfb9592a09e1701acf808cd44
 
-      - name: configure
+      - name: Configure
         run: >
           cmake -B ShellSpace/build -S ShellSpace
           -DCMAKE_BUILD_TYPE=Release
           -DJUCE_PATH=fetch
           -DSS_COPY_AFTER_BUILD=OFF
 
-      - name: build
+      - name: Build
         run: cmake --build ShellSpace/build --config Release --parallel 3
 
-      - name: DSP検証を走らせる
+      - name: Run DSP tests
         shell: bash
         run: |
           exe=$(find ShellSpace/build -type f \
                 \( -name 'ShellSpaceDspTest' -o -name 'ShellSpaceDspTest.exe' \) \
                 -not -path '*/_deps/*' | head -1)
-          echo "running: $exe"
+          test -n "$exe"
           "$exe"
 
-      - name: 成果物を集める
+      - name: Collect products
         shell: bash
         run: |
-          mkdir -p dist
-          # VST3 / AU はバンドル(フォルダ)なので、丸ごとコピーする
-          find ShellSpace/build -maxdepth 6 -name 'ShellSpace.vst3' -not -path '*/_deps/*' \
+          set -euxo pipefail
+          mkdir -p dist/IR
+          find ShellSpace/build -maxdepth 8 -name 'ShellSpace.vst3' -not -path '*/_deps/*' \
             -exec cp -R {} dist/ \; -quit
+          test -e dist/ShellSpace.vst3
           if [ "${{ matrix.slug }}" = "macos" ]; then
-            find ShellSpace/build -maxdepth 6 -name 'ShellSpace.component' -not -path '*/_deps/*' \
+            find ShellSpace/build -maxdepth 8 -name 'ShellSpace.component' -not -path '*/_deps/*' \
               -exec cp -R {} dist/ \; -quit
+            test -e dist/ShellSpace.component
           fi
-          cp IR/*.wav dist/ 2>/dev/null || true
-          ls -la dist
+          cp IR/*.wav dist/IR/
+          cp README.md dist/
+          cp ShellSpace/check-install.ps1 dist/
 
-      # macOS は VST3 と AU で置き場所が別なので、pkg にすると手間が減る。
-      # 署名はしていないので Gatekeeper は止める（README に回避手順あり）。
-      - name: macOS の pkg を作る
+      - name: Validate VST3 with pluginval
+        shell: bash
+        run: |
+          set -euxo pipefail
+          if [ "${{ matrix.slug }}" = "macos" ]; then
+            curl -sL -o pluginval.zip \
+              "https://github.com/Tracktion/pluginval/releases/download/${PLUGINVAL_VERSION}/pluginval_macOS.zip"
+            unzip -q pluginval.zip
+            validator="./pluginval.app/Contents/MacOS/pluginval"
+          else
+            curl -sL -o pluginval.zip \
+              "https://github.com/Tracktion/pluginval/releases/download/${PLUGINVAL_VERSION}/pluginval_Windows.zip"
+            unzip -q pluginval.zip
+            validator="./pluginval.exe"
+          fi
+          for seed in 1 2 5; do
+            "$validator" --strictness-level 10 --validate-in-process \
+              --random-seed "$seed" --timeout-ms 900000 \
+              --validate dist/ShellSpace.vst3
+          done
+
+      - name: Validate Audio Unit
+        if: matrix.slug == 'macos'
+        run: |
+          set -euxo pipefail
+          mkdir -p ~/Library/Audio/Plug-Ins/Components
+          cp -R dist/ShellSpace.component ~/Library/Audio/Plug-Ins/Components/
+          killall -9 AudioComponentRegistrar || true
+          sleep 3
+          auval -v aufx Shsp Ysku
+
+      - name: Build Windows installer and portable zip
+        if: matrix.slug == 'windows'
+        shell: pwsh
+        run: |
+          choco install innosetup --no-progress -y
+          & 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe' `
+            "/DSourceDir=$pwd\dist" `
+            "/DAppVersion=$env:VERSION" `
+            'installer\ShellSpace.iss'
+          Compress-Archive -Path 'dist\ShellSpace.vst3','dist\IR','dist\README.md','dist\check-install.ps1' `
+            -DestinationPath "dist\ShellSpace-$env:VERSION-Windows-x64.zip"
+          Move-Item "installer\ShellSpace-$env:VERSION-Setup.exe" dist\
+
+      - name: Build macOS installer and portable zip
         if: matrix.slug == 'macos'
         shell: bash
         run: |
           set -euxo pipefail
-          ver=0.3.0
           mkdir -p pkgroot/vst3 pkgroot/au pkgparts
-
-          cp -R dist/ShellSpace.vst3      pkgroot/vst3/
+          cp -R dist/ShellSpace.vst3 pkgroot/vst3/
           cp -R dist/ShellSpace.component pkgroot/au/
-
           pkgbuild --root pkgroot/vst3 \
                    --identifier com.yokosuka.shellspace.vst3 \
-                   --version "$ver" \
+                   --version "$VERSION" \
                    --install-location /Library/Audio/Plug-Ins/VST3 \
                    pkgparts/vst3.pkg
-
           pkgbuild --root pkgroot/au \
                    --identifier com.yokosuka.shellspace.au \
-                   --version "$ver" \
+                   --version "$VERSION" \
                    --install-location /Library/Audio/Plug-Ins/Components \
                    pkgparts/au.pkg
-
           cat > distribution.xml <<'XML'
           <?xml version="1.0" encoding="utf-8"?>
           <installer-gui-script minSpecVersion="2">
@@ -114,26 +153,30 @@ jobs:
               <line choice="vst3"/>
               <line choice="au"/>
             </choices-outline>
-            <choice id="vst3" title="VST3" description="Cubase / Studio One / Live など">
+            <choice id="vst3" title="VST3" description="Cubase, Studio One, Live and compatible hosts">
               <pkg-ref id="com.yokosuka.shellspace.vst3"/>
             </choice>
-            <choice id="au" title="Audio Unit" description="Logic Pro / GarageBand">
+            <choice id="au" title="Audio Unit" description="Logic Pro and GarageBand">
               <pkg-ref id="com.yokosuka.shellspace.au"/>
             </choice>
             <pkg-ref id="com.yokosuka.shellspace.vst3">vst3.pkg</pkg-ref>
             <pkg-ref id="com.yokosuka.shellspace.au">au.pkg</pkg-ref>
           </installer-gui-script>
           XML
-
           productbuild --distribution distribution.xml \
                        --package-path pkgparts \
-                       "dist/ShellSpace-${ver}-macOS.pkg"
+                       "dist/ShellSpace-${VERSION}-macOS.pkg"
+          ditto -c -k --sequesterRsrc --keepParent dist/ShellSpace.vst3 \
+            "dist/ShellSpace-${VERSION}-macOS-VST3.zip"
+          ditto -c -k --sequesterRsrc --keepParent dist/ShellSpace.component \
+            "dist/ShellSpace-${VERSION}-macOS-AU.zip"
 
-          ls -la dist
-
-      - name: アーティファクトを上げる
+      - name: Upload distributables
         uses: actions/upload-artifact@v4
         with:
-          name: ShellSpace-${{ matrix.slug }}
-          path: dist
+          name: ShellSpace-${{ env.VERSION }}-${{ matrix.slug }}
+          path: |
+            dist/*.exe
+            dist/*.pkg
+            dist/*.zip
           if-no-files-found: error

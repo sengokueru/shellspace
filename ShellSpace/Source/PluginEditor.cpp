@@ -14,7 +14,7 @@ namespace
     constexpr int kColW     = 100;
     constexpr int kColGap   = 8;
     constexpr int kNumCols  = 4;
-    constexpr int kTopH     = 188;  // 選択・ボタン・ノブ（ノブが掴める大きさになる高さ）
+    constexpr int kTopH     = 220;  // BODYのType/Material/Kitとノブが収まる高さ
     constexpr int kMuteH    = 26;   // MUTE / BYPASS
     constexpr int kFaderH   = 180;
     constexpr int kNameH    = 24;   // 一番下の名前帯
@@ -76,6 +76,22 @@ Fader::Fader (juce::AudioProcessorValueTreeState& s, const juce::String& id,
     value.setJustificationType (juce::Justification::centred);
     value.setColour (juce::Label::textColourId, kText);
     value.setFont (juce::FontOptions (12.0f));
+    value.setEditable (false, true, false);  // ダブルクリックでdBを直接入力
+    value.setTooltip (u8 ("ダブルクリックして数値入力"));
+    value.onTextChange = [this]
+    {
+        const auto text = value.getText().trim();
+        double target = slider.getValue();
+
+        if (text == u8 ("切") || text.equalsIgnoreCase ("off"))
+            target = slider.getMinimum();
+        else if (text.containsAnyOf ("0123456789"))
+            target = text.retainCharacters ("0123456789+-.").getDoubleValue();
+
+        slider.setValue (juce::jlimit (slider.getMinimum(), slider.getMaximum(), target),
+                         juce::sendNotificationSync);
+        sliderValueChanged (&slider);
+    };
     addAndMakeVisible (value);
 
     sliderValueChanged (&slider);
@@ -185,9 +201,17 @@ ShellSpaceEditor::ShellSpaceEditor (ShellSpaceProcessor& p)
     };
 
     addAndMakeVisible (bodyType);
+    addAndMakeVisible (bodyMaterial);
+    addAndMakeVisible (bodyKit);
     addAndMakeVisible (spaceType);
-    setUpChoice (bodyType,  "bodyType",  bodyTypeAtt);
-    setUpChoice (spaceType, "spaceType", spaceTypeAtt);
+    setUpChoice (bodyType,     "bodyType",     bodyTypeAtt);
+    setUpChoice (bodyMaterial, "bodyMaterial", bodyMaterialAtt);
+    setUpChoice (bodyKit,      "bodyKit",      bodyKitAtt);
+    setUpChoice (spaceType,    "spaceType",    spaceTypeAtt);
+
+    bodyType.setTooltip (u8 ("ドラム胴鳴り／ギターキャビ／ベースキャビ"));
+    bodyMaterial.setTooltip (u8 ("胴材。キャビ選択時は使用しません"));
+    bodyKit.setTooltip (u8 ("Yamaha各シリーズの構造・鳴り方を抽象化した合成モデル"));
 
     for (auto* b : { &bodyIRButton, &spaceIRButton })
     {
@@ -307,6 +331,15 @@ void ShellSpaceEditor::timerCallback()
         refreshIRLabels();
     }
 
+    const int bodyTypeIndex = (int) proc.apvts.getRawParameterValue ("bodyType")->load();
+    if (bodyTypeIndex != lastBodyType)
+    {
+        lastBodyType = bodyTypeIndex;
+        const bool drum = bodyTypeIndex < 3;
+        bodyMaterial.setEnabled (drum);
+        bodyKit.setEnabled (drum);
+    }
+
     const auto bodyErr  = proc.getIRError (true);
     const auto spaceErr = proc.getIRError (false);
 
@@ -382,7 +415,8 @@ void ShellSpaceEditor::resized()
 
     // 行の高さを固定して、どの列でもノブが同じ大きさになるようにする。
     // 使わない行も場所だけ空けておかないと、行数の少ない列のノブだけ巨大になる。
-    auto layoutColumn = [this, &columnTop] (int index, juce::ComboBox* box,
+    auto layoutColumn = [this, &columnTop] (int index, juce::ComboBox* box1,
+                                            juce::ComboBox* box2, juce::ComboBox* box3,
                                             juce::Button* irButton, juce::Button* toggle,
                                             Knob& knob)
     {
@@ -390,20 +424,27 @@ void ShellSpaceEditor::resized()
 
         auto row = [&r] (int h, int gap) { auto a = r.removeFromTop (h); r.removeFromTop (gap); return a; };
 
-        auto comboArea  = row (kComboH, 4);
+        auto comboArea1 = row (kComboH, 4);
+        auto comboArea2 = row (kComboH, 4);
+        auto comboArea3 = row (kComboH, 4);
         auto irArea     = row (kSmallH, 2);
         auto toggleArea = row (kSmallH, 4);
 
-        if (box       != nullptr) box      ->setBounds (comboArea);
+        if (box1      != nullptr) box1     ->setBounds (comboArea1);
+        if (box2      != nullptr) box2     ->setBounds (comboArea2);
+        if (box3      != nullptr) box3     ->setBounds (comboArea3);
         if (irButton  != nullptr) irButton ->setBounds (irArea);
         if (toggle    != nullptr) toggle   ->setBounds (toggleArea);
 
         knob.setBounds (r);
     };
 
-    layoutColumn (0, &bodyType,  &bodyIRButton,  nullptr,           bodyTune);
-    layoutColumn (1, &spaceType, &spaceIRButton, &trueStereoToggle, spacePre);
-    layoutColumn (3, nullptr,    nullptr,        nullptr,           hpf);
+    layoutColumn (0, &bodyType,  &bodyMaterial, &bodyKit,
+                  &bodyIRButton, nullptr, bodyTune);
+    layoutColumn (1, &spaceType, nullptr, nullptr,
+                  &spaceIRButton, &trueStereoToggle, spacePre);
+    layoutColumn (3, nullptr, nullptr, nullptr,
+                  nullptr, nullptr, hpf);
 
     // ---- MUTE / BYPASS とフェーダー -----------------------------------------
     Fader* faders[] = { &bodyLevel, &spaceLevel, &dry, &out };
