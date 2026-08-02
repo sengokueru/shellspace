@@ -233,7 +233,7 @@ int main (int argc, char** argv)
 
     std::cout << "\n== パラメータ ==" << std::endl;
     const juce::StringArray expected {
-        "Body Type", "Shell Material", "Kit Model", "Body Tune", "Body Level",
+        "Body Type", "Shell Material", "Shell Character", "Body Tune", "Body Level",
         "Space Type", "Predelay", "Space Level",
         "Wet HPF", "Dry", "Output" };
 
@@ -312,11 +312,11 @@ int main (int argc, char** argv)
     check (decayRatio < 0.8, "減衰も短くなる（IR全体が縮んでいる）",
            "ratio=" + juce::String (decayRatio, 3));
 
-    // ---- 胴材とキット特性を同時に切り替える -------------------------------
-    std::cout << "\n== BODY (Mahogany / Tour Custom) ==" << std::endl;
-    setParam (*instance, "Body Tune",     0.5f);
-    setParam (*instance, "Shell Material", 2.0f / 3.0f); // Mahogany
-    setParam (*instance, "Kit Model",      1.0f);         // Tour Custom
+    // ---- 胴材と胴の性格を同時に切り替える ---------------------------------
+    std::cout << "\n== BODY (Mahogany / Open) ==" << std::endl;
+    setParam (*instance, "Body Tune",       0.5f);
+    setParam (*instance, "Shell Material",  2.0f / 3.0f); // Mahogany
+    setParam (*instance, "Shell Character", 1.0f);        // Open
     pump (2000);
 
     auto warmBody = captureImpulseResponse (*instance);
@@ -328,25 +328,25 @@ int main (int argc, char** argv)
     check (warmHz < hz0, "Mahogany/TourはBirch/Recordingより基音が低い",
            juce::String (warmHz, 1) + " < " + juce::String (hz0, 1));
     check (warmMeasure.decayMs > kick0.decayMs,
-           "Mahogany/TourはBirch/Recordingより減衰が長い");
+           "Mahogany/OpenはBirch/Studioより減衰が長い");
 
     // ---- キャビネット2種 --------------------------------------------------
-    std::cout << "\n== BODY (Guitar 1960A 4x12) ==" << std::endl;
+    std::cout << "\n== BODY (Guitar 4x12) ==" << std::endl;
     setParam (*instance, "Body Type", 0.75f);
     pump (2000);
     auto guitarCab = captureImpulseResponse (*instance);
     const double guitarPeakHz = dominantHz (guitarCab);
-    check (measure (guitarCab).peak > 0.001f, "Marshall 1960A型キャビIRから音が出る");
+    check (measure (guitarCab).peak > 0.001f, "ギター4x12キャビIRから音が出る");
     check (guitarPeakHz > 80.0 && guitarPeakHz < 5000.0,
            "ギターキャビの主成分が80Hz〜5kHzにある",
            juce::String (guitarPeakHz, 1) + "Hz");
 
-    std::cout << "\n== BODY (Bass Ampeg 8x10) ==" << std::endl;
+    std::cout << "\n== BODY (Bass 8x10) ==" << std::endl;
     setParam (*instance, "Body Type", 1.0f);
     pump (2000);
     auto bassCab = captureImpulseResponse (*instance);
     const double bassPeakHz = dominantHz (bassCab);
-    check (measure (bassCab).peak > 0.001f, "Ampeg SVT-810E型キャビIRから音が出る");
+    check (measure (bassCab).peak > 0.001f, "ベース8x10キャビIRから音が出る");
     check (bassPeakHz > 35.0 && bassPeakHz < 5000.0,
            "ベースキャビの主成分が40Hz近傍〜5kHzにある",
            juce::String (bassPeakHz, 1) + "Hz");

@@ -71,11 +71,11 @@ for p in sorted(glob.glob(os.path.join(D, '*.wav'))):
         print('   1kHz基準:', '  '.join(f'{hz:>4}Hz={db:+5.1f}dB'
                                       for hz, db in zip(points, vals)))
         print(f'   L/R一致(mono安全): {np.allclose(x[:,0], x[:,1])}')
-        if 'Marshall' in p:
-            print(f'   G12T-75帯域(80Hz-5kHz): '
+        if 'Guitar' in p:
+            print(f'   4x12帯域(80Hz-5kHz): '
                   f'{vals[2] > -15 and vals[7] > -20}  8kHz減衰: {vals[8] < -20}')
         else:
-            print(f'   SVT-810E低域(40Hz≈-10dB): {abs((vals[0]-vals[4]) + 10) < 4}  '
+            print(f'   8x10低域(40Hz≈-10dB): {abs((vals[0]-vals[4]) + 10) < 4}  '
                   f'5kHzまで有効: {vals[7] > -10}')
     else:
         F = np.abs(np.fft.rfft(mono * np.hanning(len(mono))))

@@ -79,6 +79,42 @@ namespace
         setNorm (p, "hpf",        0.0f);
         setNorm (p, "out",        0.5f);           // 0dB
     }
+
+    /** SPACEだけ鳴らす設定にする。True Stereo の経路を通すために追加。 */
+    void configureSpaceOnly (ShellSpaceProcessor& p, bool trueStereo)
+    {
+        setNorm (p, "dry",        0.0f);           // -60dB
+        setNorm (p, "bodyLevel",  0.0f);           // -60dB
+        setNorm (p, "spaceLevel", 60.0f / 72.0f);  // 0dB
+        setNorm (p, "spaceType",  1.0f);           // Hall Drum
+        setNorm (p, "spacePre",   0.0f);           // 0ms
+        setNorm (p, "trueStereo", trueStereo ? 1.0f : 0.0f);
+        setNorm (p, "hpf",        0.0f);
+        setNorm (p, "out",        0.5f);           // 0dB
+    }
+
+    /** インパルスを入れて1秒ぶんのピークを測る */
+    Stats runImpulse (ShellSpaceProcessor& p, int numCh, double sr, int blockSize)
+    {
+        juce::AudioBuffer<float> block (numCh, blockSize);
+        juce::MidiBuffer midi;
+        Stats total;
+
+        for (int b = 0; b < (int) (sr / blockSize); ++b)
+        {
+            block.clear();
+            if (b == 0)
+                for (int ch = 0; ch < numCh; ++ch)
+                    block.setSample (ch, 0, 1.0f);
+
+            p.processBlock (block, midi);
+
+            const auto s = scan (block);
+            total.peak = juce::jmax (total.peak, s.peak);
+            total.finite = total.finite && s.finite;
+        }
+        return total;
+    }
 }
 
 int main()
@@ -219,6 +255,67 @@ int main()
             std::cout << "  peak=" << std::fixed << std::setprecision (6) << total.peak << std::endl;
             check (total.finite, "モノラルでNaN/Infが出ない");
             check (total.peak > 0.001f, "モノラルでも音が出る");
+        }
+    }
+
+    // ---- 4. SPACE と True Stereo -------------------------------------------
+    // True Stereo は 4ch IR を spaceConvL/R に読む。通常ステレオ用の spaceConv は
+    // 読み込まれないので、その経路に落ちると「IRの無い畳み込み」を通ることになる。
+    // パラメータ変更は triggerAsyncUpdate 経由でメッセージスレッドに投げられる。
+    // このテストはメッセージループを回さないので、変更を反映させるには
+    // 「設定してから prepareToPlay」の順にする必要がある
+    // (prepareToPlay は reloadBodyIR/reloadSpaceIR を直接呼ぶ)。
+    std::cout << "\n== SPACE (通常ステレオ) ==" << std::endl;
+    {
+        ShellSpaceProcessor proc;
+        configureSpaceOnly (proc, false);
+        proc.prepareToPlay (sr, prepared);
+        warmUp (proc, sr, prepared);
+
+        const auto s = runImpulse (proc, 2, sr, prepared);
+        std::cout << "  peak=" << std::fixed << std::setprecision (6) << s.peak << std::endl;
+        check (s.finite, "通常ステレオでNaN/Infが出ない");
+        check (s.peak > 0.001f, "通常ステレオで音が出る");
+    }
+
+    std::cout << "\n== SPACE (True Stereo / ステレオ) ==" << std::endl;
+    {
+        ShellSpaceProcessor proc;
+        configureSpaceOnly (proc, true);
+        proc.prepareToPlay (sr, prepared);
+        warmUp (proc, sr, prepared);
+
+        const auto s = runImpulse (proc, 2, sr, prepared);
+        std::cout << "  peak=" << std::fixed << std::setprecision (6) << s.peak << std::endl;
+        check (s.finite, "True StereoでNaN/Infが出ない");
+        check (s.peak > 0.001f, "True Stereoで音が出る");
+    }
+
+    std::cout << "\n== SPACE (True Stereo / モノラル) ==" << std::endl;
+    {
+        ShellSpaceProcessor proc;
+
+        juce::AudioProcessor::BusesLayout mono;
+        mono.inputBuses .add (juce::AudioChannelSet::mono());
+        mono.outputBuses.add (juce::AudioChannelSet::mono());
+
+        if (proc.setBusesLayout (mono))
+        {
+            configureSpaceOnly (proc, true);
+            proc.prepareToPlay (sr, prepared);
+            warmUp (proc, sr, prepared);
+
+            const auto s = runImpulse (proc, 1, sr, prepared);
+            std::cout << "  peak=" << std::fixed << std::setprecision (6) << s.peak << std::endl;
+
+            check (s.finite, "モノ+True StereoでNaN/Infが出ない");
+            check (s.peak > 0.001f, "モノ+True Stereoで残響が出る");
+
+            // 素通しだと入力インパルス(1.0)がほぼそのまま出る。
+            // 残響なら畳み込みで拡散してピークはずっと小さくなる。
+            check (s.peak < 0.5f,
+                   "モノ+True Stereo で入力が素通しになっていない",
+                   "peak=" + juce::String (s.peak, 4));
         }
     }
 

@@ -8,13 +8,12 @@ namespace
 {
     const char* kBodyKinds[]    = { "Kick", "Snare", "Tom" };
     const char* kBodyMaterials[] = { "Maple", "Birch", "Mahogany", "Oak" };
-    const char* kBodyKits[]      = { "RecordingCustom", "LiveCustom",
-                                     "StageCustom", "TourCustom" };
+    const char* kBodyKits[]      = { "Studio", "Projection", "Tight", "Open" };
 
     juce::String builtInBodyFile (int type, int material, int kit)
     {
-        if (type == 3) return "Cab_Marshall1960A_4x12.wav";
-        if (type == 4) return "Cab_AmpegSVT810E_8x10.wav";
+        if (type == 3) return "Cab_Guitar_4x12.wav";
+        if (type == 4) return "Cab_Bass_8x10.wav";
 
         return "Shell_" + juce::String (kBodyKinds[juce::jlimit (0, 2, type)])
              + "_" + kBodyMaterials[juce::jlimit (0, 3, material)]
@@ -80,8 +79,9 @@ namespace
         { "Kick Body",         0.0f, 0.333f, 0.0f, 0.5f, 0.556f, 1.0f, 0.167f, 0.000f, 0.0f, 0.0f, 0.909f, 0.5f },
         { "Snare Body",       0.25f, 0.333f, 0.0f, 0.5f, 0.556f, 1.0f, 0.167f, 0.000f, 0.0f, 0.0f, 0.909f, 0.5f },
         { "Tom Body",         0.50f, 0.333f, 0.0f, 0.5f, 0.583f, 1.0f, 0.167f, 0.000f, 0.0f, 0.0f, 0.909f, 0.5f },
-        { "Guitar 1960A",     0.75f, 0.333f, 0.0f, 0.5f, 0.833f, 1.0f, 0.167f, 0.000f, 0.0f, 0.0f, 0.909f, 0.5f },
-        { "Bass SVT-810E",    1.00f, 0.333f, 0.0f, 0.5f, 0.833f, 1.0f, 0.167f, 0.000f, 0.0f, 0.0f, 0.909f, 0.5f },
+        // キャビは原音を「置き換える」もの。Dryを混ぜるとキャビの意味が消えるので切る。
+        { "Guitar Cab",       0.75f, 0.333f, 0.0f, 0.5f, 0.833f, 1.0f, 0.167f, 0.000f, 0.0f, 0.0f, 0.000f, 0.5f },
+        { "Bass Cab",         1.00f, 0.333f, 0.0f, 0.5f, 0.833f, 1.0f, 0.167f, 0.000f, 0.0f, 0.0f, 0.000f, 0.5f },
         { "Drum Hall (Send)",  0.0f, 0.333f, 0.0f, 0.5f, 0.000f, 1.0f, 0.250f, 0.833f, 1.0f, 0.35f, 0.000f, 0.5f },
         { "Full Hall (Send)",  0.0f, 0.333f, 0.0f, 0.5f, 0.000f, 0.0f, 0.167f, 0.833f, 1.0f, 0.0f, 0.000f, 0.5f },
         { "Body + Hall",       0.0f, 0.333f, 0.0f, 0.5f, 0.500f, 1.0f, 0.250f, 0.472f, 1.0f, 0.30f, 0.909f, 0.5f },
@@ -98,15 +98,15 @@ juce::AudioProcessorValueTreeState::ParameterLayout ShellSpaceProcessor::createL
 
     layout.add (std::make_unique<AudioParameterChoice> (
         ParameterID { "bodyType", 1 }, "Body Type",
-        StringArray { "Kick", "Snare", "Tom", "Guitar 1960A 4x12", "Bass Ampeg 8x10" }, 0));
+        StringArray { "Kick", "Snare", "Tom", "Guitar 4x12", "Bass 8x10" }, 0));
 
     layout.add (std::make_unique<AudioParameterChoice> (
         ParameterID { "bodyMaterial", 1 }, "Shell Material",
         StringArray { "Maple", "Birch", "Mahogany", "Oak" }, 1));
 
     layout.add (std::make_unique<AudioParameterChoice> (
-        ParameterID { "bodyKit", 1 }, "Kit Model",
-        StringArray { "Recording Custom", "Live Custom", "Stage Custom", "Tour Custom" }, 0));
+        ParameterID { "bodyKit", 1 }, "Shell Character",
+        StringArray { "Studio", "Projection", "Tight", "Open" }, 0));
 
     layout.add (std::make_unique<AudioParameterFloat> (
         ParameterID { "bodyTune", 1 }, "Body Tune",
@@ -243,21 +243,40 @@ void ShellSpaceProcessor::setUserIR (bool body, const juce::File& file)
 
     apvts.state.setProperty (body ? kBodyIRProperty : kSpaceIRProperty, path, nullptr);
 
+    {
+        const juce::ScopedLock sl (stateLock);
+        (body ? userBodyIRPath : userSpaceIRPath) = path;
+    }
+
     if (body) bodyDirty = true;
     else      spaceDirty = true;
 
     triggerAsyncUpdate();
 }
 
+void ShellSpaceProcessor::refreshUserIRPaths()
+{
+    const auto b = apvts.state.getProperty (kBodyIRProperty).toString();
+    const auto s = apvts.state.getProperty (kSpaceIRProperty).toString();
+
+    const juce::ScopedLock sl (stateLock);
+    userBodyIRPath  = b;
+    userSpaceIRPath = s;
+}
+
 juce::File ShellSpaceProcessor::getUserIR (bool body) const
 {
-    const auto path = apvts.state.getProperty (body ? kBodyIRProperty : kSpaceIRProperty).toString();
+    juce::String path;
+    {
+        const juce::ScopedLock sl (stateLock);
+        path = body ? userBodyIRPath : userSpaceIRPath;
+    }
     return path.isEmpty() ? juce::File() : juce::File (path);
 }
 
 juce::String ShellSpaceProcessor::getIRError (bool body) const
 {
-    const juce::ScopedLock sl (errorLock);
+    const juce::ScopedLock sl (stateLock);
     return body ? bodyIRError : spaceIRError;
 }
 
@@ -311,6 +330,10 @@ juce::AudioBuffer<float> ShellSpaceProcessor::readIR (const juce::File& userFile
 //==============================================================================
 void ShellSpaceProcessor::reloadBodyIR()
 {
+    // prepareToPlay(ホストスレッド)と handleAsyncUpdate(メッセージスレッド)が
+    // 同時に入ると formatManager と Convolution を並行して触ることになる。
+    const juce::ScopedLock sl (irLoadLock);
+
     const int index = (int) apvts.getRawParameterValue ("bodyType")->load();
     const int material = (int) apvts.getRawParameterValue ("bodyMaterial")->load();
     const int kit = (int) apvts.getRawParameterValue ("bodyKit")->load();
@@ -322,7 +345,7 @@ void ShellSpaceProcessor::reloadBodyIR()
                        irRate, err);
 
     {
-        const juce::ScopedLock sl (errorLock);
+        const juce::ScopedLock sl (stateLock);
         bodyIRError = err;
     }
 
@@ -360,8 +383,17 @@ void ShellSpaceProcessor::reloadBodyIR()
 
 void ShellSpaceProcessor::reloadSpaceIR()
 {
+    const juce::ScopedLock sl (irLoadLock);
+
     const int index = juce::jlimit (0, 1, (int) apvts.getRawParameterValue ("spaceType")->load());
-    const bool wantTrueStereo = apvts.getRawParameterValue ("trueStereo")->load() > 0.5f;
+
+    // モノラルのバスでは True Stereo が成立しない（左右の音源を分けられない）。
+    // ここで落としておかないと、processChunk が通常ステレオ側へ分岐するのに
+    // spaceConv へIRを読んでいない状態になり、JUCEのConvolutionが入力を
+    // 素通しして「残響のかわりに原音が返る」。
+    const bool stereoBus = getTotalNumOutputChannels() >= 2;
+    const bool wantTrueStereo = apvts.getRawParameterValue ("trueStereo")->load() > 0.5f
+                                  && stereoBus;
 
     double irRate = 48000.0;
     juce::String err;
@@ -373,7 +405,7 @@ void ShellSpaceProcessor::reloadSpaceIR()
 
     if (src.getNumSamples() <= 0)
     {
-        const juce::ScopedLock sl (errorLock);
+        const juce::ScopedLock sl (stateLock);
         spaceIRError = err;
         trueStereoActive = false;
         return;
@@ -387,7 +419,7 @@ void ShellSpaceProcessor::reloadSpaceIR()
                 + juce::String (src.getNumChannels()) + u8 ("ch）");
 
     {
-        const juce::ScopedLock sl (errorLock);
+        const juce::ScopedLock sl (stateLock);
         spaceIRError = err;
     }
 
@@ -539,7 +571,9 @@ void ShellSpaceProcessor::processChunk (juce::AudioBuffer<float>& buffer, int nu
         }
     }
 
-    if (trueStereoActive.load() && numCh >= 2)
+    // trueStereoActive はモノラルのバスでは立たない（reloadSpaceIRで落としている）。
+    // 念のためここでも確認し、条件が崩れたらIR未ロードの畳み込みを通さないようにする。
+    if (trueStereoActive.load() && numCh >= 2 && spaceBufL.getNumChannels() >= 2)
     {
         // True Stereo: 左入力を LL/LR に、右入力を RL/RR に通して足す。
         // 各系統は入力を両chに複製して渡す（IRの2chがそれぞれの行き先）。
@@ -639,6 +673,10 @@ void ShellSpaceProcessor::setStateInformation (const void* data, int sizeInBytes
             }
         }
     }
+
+    // 復元した state からユーザーIRのパスをキャッシュへ写す。
+    // これを忘れると、復元後のリロードが古いパスを見る。
+    refreshUserIRPaths();
 
     bodyDirty = true;
     spaceDirty = true;

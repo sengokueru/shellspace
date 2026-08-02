@@ -6,9 +6,9 @@
   Hall_Yokosuka-type_Full_Stereo.wav       2ch              同上・2ch版
   Hall_Yokosuka-type_Drum_TrueStereo.wav   4ch LL,LR,RL,RR  低域を締めたドラム用
   Hall_Yokosuka-type_Drum_Stereo.wav       2ch              同上・2ch版
-  Shell_<Kind>_<Material>_<YamahaKit>.wav     2ch  胴材×キット特性
-  Cab_Marshall1960A_4x12.wav                  2ch  ギターキャビ
-  Cab_AmpegSVT810E_8x10.wav                   2ch  ベースキャビ
+  Shell_<Kind>_<Material>_<Character>.wav     2ch  胴材×胴構造の性格
+  Cab_Guitar_4x12.wav                         2ch  ギターキャビ
+  Cab_Bass_8x10.wav                           2ch  ベースキャビ
 
 重要: ホールIRに直接音は入っていない（センド/FXトラック前提）。
 """
@@ -221,26 +221,26 @@ MATERIALS = {
     'Oak':      dict(f=1.05, ampLow=0.94, ampHigh=1.32, decLow=0.94, decHigh=1.02, noise=1.28),
 }
 
-# Yamaha各シリーズの公式な材・厚み・ラグ・エッジ・ヘッドの説明を、
-# 基準胴のモード列へ掛ける「キャラクター」として抽象化したもの。
-# 実測IRの複製ではなく、公開仕様から推定した合成モデル。
-YAMAHA_KITS = {
-    # 6ply Birch / weighted high-tension lug / 30-degree edge:
-    # 芯の低域、明瞭な発音、不要共振を抑えた録音向けのまとまり。
-    'RecordingCustom': dict(f=0.995, ampLow=1.10, ampHigh=1.03,
-                            decLow=1.03, decHigh=0.82, noise=0.76),
-    # 7ply Oak/Phenolic / 2.3mm hoop / YESS III:
+# 胴の構造（プライ数・厚み・フープ・エッジ）が音に与える傾向を、
+# 基準胴のモード列へ掛ける「性格」として抽象化したもの。
+# 特定製品の実測IRではなく、構造から導いた合成モデル。
+KIT_CHARACTERS = {
+    # 薄めのプライ + 高テンションのラグ + 鋭いエッジ:
+    # 芯のある低域、明瞭な発音、不要共振が少ない。録音向けのまとまり。
+    'Studio':     dict(f=0.995, ampLow=1.10, ampHigh=1.03,
+                       decLow=1.03, decHigh=0.82, noise=0.76),
+    # 厚いプライ + 太いフープ + 胴を締め付けない支持:
     # 投射、強いアタック、大きな低域、自由なサステイン。
-    'LiveCustom':      dict(f=1.018, ampLow=1.18, ampHigh=1.22,
-                            decLow=1.04, decHigh=1.08, noise=1.24),
-    # 6ply 7.2mm Birch / 1.5mm hoop:
+    'Projection': dict(f=1.018, ampLow=1.18, ampHigh=1.22,
+                       decLow=1.04, decHigh=1.08, noise=1.24),
+    # 厚めの胴 + 細いフープ:
     # 短い減衰、速いアタック、タイトな分離。
-    'StageCustom':     dict(f=1.028, ampLow=0.86, ampHigh=1.12,
-                            decLow=0.78, decHigh=0.84, noise=0.92),
-    # 6ply 5.6mm Maple / 2.3mm inverse hoop:
+    'Tight':      dict(f=1.028, ampLow=0.86, ampHigh=1.12,
+                       decLow=0.78, decHigh=0.84, noise=0.92),
+    # 薄い胴 + 逆巻きフープ:
     # 暖かく明るい、比較的開いた共鳴。
-    'TourCustom':      dict(f=0.990, ampLow=1.13, ampHigh=1.07,
-                            decLow=1.12, decHigh=1.15, noise=0.90),
+    'Open':       dict(f=0.990, ampLow=1.13, ampHigh=1.07,
+                       decLow=1.12, decHigh=1.15, noise=0.90),
 }
 
 
@@ -265,8 +265,8 @@ def stable_seed(text):
 def shell(kind, material, kit):
     dur, modes, noises, hp = SHELLS[kind]
     modes = apply_character(modes, MATERIALS[material])
-    modes = apply_character(modes, YAMAHA_KITS[kit])
-    noise_mult = MATERIALS[material]['noise'] * YAMAHA_KITS[kit]['noise']
+    modes = apply_character(modes, KIT_CHARACTERS[kit])
+    noise_mult = MATERIALS[material]['noise'] * KIT_CHARACTERS[kit]['noise']
     noises = [(fc, bw, amp * noise_mult, dec) for fc, bw, amp, dec in noises]
     n = int(SR * dur)
     t = np.arange(n) / SR
@@ -311,18 +311,20 @@ def minimum_phase_cab(anchors, duration=0.085):
     return np.stack([ir, ir], axis=1)
 
 
-# Marshall 1960A: Celestion G12T-75 x4。公式の80Hz–5kHz / Fs=85Hzと
-# 「tight low end / aggressive mids / softened top」を周波数アンカー化。
-MARSHALL_1960A = [
+# ギター 4x12（斜め front-loaded / 12インチ4発）の典型:
+# 締まった低域・押し出す中域・落ちる高域。Fs 85Hz前後、5kHz以上は急落。
+# 特定製品の実測ではなく、この構成に共通する帯域特性をアンカー化したもの。
+GUITAR_4X12 = [
     (20, -55), (40, -35), (60, -18), (80, -4), (85, 0),
     (120, 2), (250, 0), (500, -2), (900, 2), (1500, 4),
     (2200, 0), (3200, 5), (4200, -3), (5000, -10),
     (7000, -35), (12000, -60), (24000, -80),
 ]
 
-# Ampeg SVT-810E: 密閉2発×4室のInfinite Baffle。
-# 公式の58Hz–5kHz ±3dB / 40Hz -10dBと「punchy, round, rapid transient」を反映。
-AMPEG_SVT810E = [
+# ベース 8x10（密閉2発×4室のInfinite Baffle / 10インチ8発）の典型:
+# 58Hz付近から伸び、40Hzで大きく落ちる。中低域が押し、高域は素直に減衰。
+# 特定製品の実測ではなく、この構成に共通する帯域特性をアンカー化したもの。
+BASS_8X10 = [
     (20, -45), (30, -24), (40, -10), (58, -3), (75, 1),
     (110, 3), (180, 1), (350, -1), (700, 1), (1200, 2),
     (2200, 0), (3500, -1), (5000, -3), (6500, -18),
@@ -340,12 +342,12 @@ jobs = {
     'Hall_Yokosuka-type_Full_Stereo.wav':     hall_pair(0, 20260802, 1.00),
     'Hall_Yokosuka-type_Drum_TrueStereo.wav': hall_true_stereo(0.80, 20260803),
     'Hall_Yokosuka-type_Drum_Stereo.wav':     hall_pair(0, 20260803, 0.80),
-    'Cab_Marshall1960A_4x12.wav': minimum_phase_cab(MARSHALL_1960A),
-    'Cab_AmpegSVT810E_8x10.wav':  minimum_phase_cab(AMPEG_SVT810E),
+    'Cab_Guitar_4x12.wav': minimum_phase_cab(GUITAR_4X12),
+    'Cab_Bass_8x10.wav':   minimum_phase_cab(BASS_8X10),
 }
 for kind in SHELLS:
     for material in MATERIALS:
-        for kit in YAMAHA_KITS:
+        for kit in KIT_CHARACTERS:
             name = f'Shell_{kind.capitalize()}_{material}_{kit}.wav'
             jobs[name] = shell(kind, material, kit)
 

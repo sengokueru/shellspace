@@ -7,8 +7,8 @@ param([switch]$Fix)
 
 $ErrorActionPreference = 'Continue'
 
-$ExpectedHash = '59BFE4067B330BAF91EB0C99F1BF07DB5FDB192C339F3D6BBE7D9F1BEB5F96DD'
-$ExpectedSize = 13753856
+# 版ごとに変わる値を固定で持たない。壊れているかどうかの下限だけを見る。
+$MinPluginBytes = 4MB
 
 Add-Type -Namespace Win -Name Native -MemberDefinition @'
 [DllImport("kernel32.dll", SetLastError=true, CharSet=CharSet.Unicode)]
@@ -171,19 +171,21 @@ foreach ($f in $found) {
     $dll = $f.Dll
     Write-Head ("ファイル検査: {0}" -f $dll)
 
+    # サイズとハッシュは版ごとに変わるので、固定値との一致では判定しない。
+    # (固定値を持つと、更新のたびに全ユーザーへ誤警告が出る)
+    # ここでは「明らかに壊れている」場合だけを弾き、ハッシュは表示にとどめる。
     $d = Get-Item $dll -Force
     Write-Host ("  サイズ  : {0:N0} bytes" -f $d.Length) -NoNewline
-    if ($d.Length -eq $ExpectedSize) { Write-Host "  (一致)" -ForegroundColor Green }
-    else { Write-Host ("  [NG] 期待値 {0:N0}" -f $ExpectedSize) -ForegroundColor Red }
+    if ($d.Length -ge $MinPluginBytes) {
+        Write-Host "  (妥当)" -ForegroundColor Green
+    } else {
+        Write-Host ("  [NG] 小さすぎます（{0:N0} bytes 未満）" -f $MinPluginBytes) -ForegroundColor Red
+        Write-Host "  -> 展開に失敗しているか、アンチウイルスに削られています" -ForegroundColor Yellow
+    }
 
     $h = (Get-FileHash $dll -Algorithm SHA256).Hash
-    if ($h -eq $ExpectedHash) {
-        Write-Host "  ハッシュ: 一致（ファイルは無傷）" -ForegroundColor Green
-    } else {
-        Write-Host "  ハッシュ: [NG] 不一致" -ForegroundColor Red
-        Write-Host ("            実際 {0}" -f $h) -ForegroundColor DarkGray
-        Write-Host "  -> ダウンロードが壊れているか、アンチウイルスに書き換えられています" -ForegroundColor Yellow
-    }
+    Write-Host ("  SHA256  : {0}" -f $h) -ForegroundColor DarkGray
+    Write-Host "            リリースの SHA256SUMS.txt と見比べてください" -ForegroundColor DarkGray
 
     # Mark of the Web
     $zone = Get-Item $dll -Stream Zone.Identifier -ErrorAction SilentlyContinue

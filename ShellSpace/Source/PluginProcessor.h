@@ -102,8 +102,23 @@ private:
     float lastPredelayMs { -1.0f }, lastHpHz { -1.0f };
     int currentProgram { 0 };
 
+    /** ユーザーIRのパスと直近のエラー。
+        juce::ValueTree はスレッド安全ではないのに、IRの読み込みは
+        prepareToPlay(ホストスレッド) と handleAsyncUpdate(メッセージスレッド) の
+        両方から走る。apvts.state を直接読みに行かず、ここに写しておく。 */
+    juce::String userBodyIRPath, userSpaceIRPath;
     juce::String bodyIRError, spaceIRError;
-    juce::CriticalSection errorLock;
+    juce::CriticalSection stateLock;
+
+    /** apvts.state の内容を上のキャッシュへ写す。メッセージスレッドから呼ぶこと。 */
+    void refreshUserIRPaths();
+
+    /** IRの読み込みを直列化する。
+        reloadBodyIR/reloadSpaceIR は prepareToPlay(ホストスレッド)と
+        handleAsyncUpdate(メッセージスレッド)の両方から走るため、同時に入ると
+        formatManager と Convolution を並行して触ることになる。
+        どちらも実時間スレッドではないのでロックして構わない。 */
+    juce::CriticalSection irLoadLock;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ShellSpaceProcessor)
 };

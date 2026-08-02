@@ -9,9 +9,9 @@ body:
       label: Area
       options:
         - Drum body or shell material
-        - Yamaha kit model
-        - Marshall-style 4x12 cabinet
-        - Ampeg-style 8x10 cabinet
+        - Shell character
+        - Guitar 4x12 cabinet
+        - Bass 8x10 cabinet
         - Controls and workflow
         - Other
     validations:

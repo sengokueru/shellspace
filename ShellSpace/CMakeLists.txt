@@ -43,8 +43,8 @@ endif()
 # 埋め込むIR。先に `python IR/make_ir.py IR` を実行して wav を生成しておくこと
 set(IR_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../IR")
 set(IR_FILES
-    "${IR_DIR}/Cab_Marshall1960A_4x12.wav"
-    "${IR_DIR}/Cab_AmpegSVT810E_8x10.wav"
+    "${IR_DIR}/Cab_Guitar_4x12.wav"
+    "${IR_DIR}/Cab_Bass_8x10.wav"
     "${IR_DIR}/Hall_Yokosuka-type_Full_Stereo.wav"
     "${IR_DIR}/Hall_Yokosuka-type_Drum_Stereo.wav"
     "${IR_DIR}/Hall_Yokosuka-type_Full_TrueStereo.wav"
@@ -52,7 +52,7 @@ set(IR_FILES
 
 foreach(kind Kick Snare Tom)
     foreach(material Maple Birch Mahogany Oak)
-        foreach(kit RecordingCustom LiveCustom StageCustom TourCustom)
+        foreach(kit Studio Projection Tight Open)
             list(APPEND IR_FILES "${IR_DIR}/Shell_${kind}_${material}_${kit}.wav")
         endforeach()
     endforeach()

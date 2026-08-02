@@ -24,9 +24,9 @@ Wet HPF は **WET 側だけ**に掛かるので、原音の低域を削らずに
 
 | | |
 |---|---|
-| **BODY** | キック / スネア / タム、Marshall 1960A型4x12、Ampeg SVT-810E型8x10。**Tune** は IR を時間軸ごと伸縮 |
+| **BODY** | キック / スネア / タム、ギター 4x12、ベース 8x10。**Tune** は IR を時間軸ごと伸縮 |
 | **Shell Material** | Maple / Birch / Mahogany / Oak |
-| **Kit Model** | Yamaha Recording / Live / Stage / Tour Customの公開仕様を抽象化した合成キャラクター |
+| **Shell Character** | Studio / Projection / Tight / Open（胴の構造による鳴り方の違い） |
 | **SPACE** | 天井の高いオペラハウス型ホール。Full / ドラム用（低域を締めた版）。**True Stereo**（4ch IR）対応 |
 | **IR 差し替え** | 各セクションから自分の wav を読み込める。パスはプロジェクトに保存される |
 | **プリセット** | 7 種 |
@@ -105,9 +105,9 @@ py -3 IR/verify_ir.py IR      # 実測検証（RT60・ピーク・モード・ch
 > **ホール IR は現地で実測したものではない。**
 > 「馬蹄形で天井が高いホールはどう鳴るか」を設計して合成したもの。
 
-Yamaha各キットとMarshall/Ampegキャビもメーカー実測IRの複製ではなく、公開されている
-材・シェル構造・スピーカー構成・帯域を合成IRへ翻訳したモデル。根拠と数値は
-[IR/README.md](IR/README.md)に記載している。
+胴の性格とキャビも**特定製品の実測IRではない**。プライ数・厚み・フープ・エッジ、
+スピーカー構成といった構造が音に与える一般的な傾向を、合成IRへ翻訳したモデル。
+根拠と数値は [IR/README.md](IR/README.md) に記載している。
 
 ## ビルド
 
@@ -145,8 +145,8 @@ cd ShellSpace
 | キック胴鳴りの基音 | 49.8 Hz |
 | Tune +12 半音での基音 | 99.6 Hz（比 2.000） |
 | Tune +12 半音での減衰 | ×0.591 |
-| Mahogany / Tour Custom キック | 基音46.9 Hz、−20dB減衰166.3 ms |
-| Marshall型 / Ampeg型キャビ | 両方出音し、主成分帯と特性差を確認 |
+| Mahogany / Open キック | 基音46.9 Hz、−20dB減衰166.3 ms |
+| ギター 4x12 / ベース 8x10 キャビ | 両方出音し、主成分帯と特性差を確認 |
 | Predelay 40ms の立ち上がり | 43.4 ms |
 | ホールの残響（−20dB まで） | 410.9 ms |
 | 追加レイテンシ | 0（立ち上がり 0.02ms） |

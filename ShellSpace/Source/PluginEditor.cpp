@@ -211,7 +211,7 @@ ShellSpaceEditor::ShellSpaceEditor (ShellSpaceProcessor& p)
 
     bodyType.setTooltip (u8 ("ドラム胴鳴り／ギターキャビ／ベースキャビ"));
     bodyMaterial.setTooltip (u8 ("胴材。キャビ選択時は使用しません"));
-    bodyKit.setTooltip (u8 ("Yamaha各シリーズの構造・鳴り方を抽象化した合成モデル"));
+    bodyKit.setTooltip (u8 ("胴の構造（プライ・厚み・フープ）による鳴り方の違い"));
 
     for (auto* b : { &bodyIRButton, &spaceIRButton })
     {
