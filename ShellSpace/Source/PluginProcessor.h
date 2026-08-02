@@ -12,7 +12,8 @@
 */
 class ShellSpaceProcessor  : public juce::AudioProcessor,
                              private juce::AudioProcessorValueTreeState::Listener,
-                             private juce::AsyncUpdater
+                             private juce::AsyncUpdater,
+                             private juce::Timer
 {
 public:
     ShellSpaceProcessor();
@@ -69,8 +70,17 @@ private:
 
     void parameterChanged (const juce::String& id, float newValue) override;
     void handleAsyncUpdate() override;
+    void timerCallback() override;
     void reloadBodyIR();
     void reloadSpaceIR();
+
+    /** IR差し替えをまとめるまでの待ち時間(ms)。
+        bodyTune は刻み0.01の連続パラメータなので、値が変わるたびに
+        loadImpulseResponse を呼ぶとオートメーション時に極端な頻度になる。
+        JUCEのConvolutionは内部で std::function のキューを使っており、
+        その頻度に耐えられず空のfunctionを呼んで abort する。
+        バーストを1回にまとめる。 */
+    static constexpr int kIRReloadDelayMs = 120;
 
     /** ブロックを内部バッファの上限以下に分割して処理する実体。 */
     void processChunk (juce::AudioBuffer<float>& buffer, int numCh, int offset, int len);

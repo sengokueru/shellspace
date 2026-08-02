@@ -180,6 +180,9 @@ ShellSpaceProcessor::ShellSpaceProcessor()
 
 ShellSpaceProcessor::~ShellSpaceProcessor()
 {
+    stopTimer();
+    cancelPendingUpdate();
+
     for (auto* id : { "bodyType", "bodyMaterial", "bodyKit", "bodyTune", "spaceType", "trueStereo" })
         apvts.removeParameterListener (id, this);
 }
@@ -194,6 +197,16 @@ void ShellSpaceProcessor::parameterChanged (const juce::String& id, float)
 
 void ShellSpaceProcessor::handleAsyncUpdate()
 {
+    // すぐには読み込まず、タイマーを張り直してバーストをまとめる。
+    // オートメーションで Tune を掃引すると毎フレーム値が変わるため、
+    // ここで直接 loadImpulseResponse を呼ぶと呼び出し頻度が過大になる。
+    startTimer (kIRReloadDelayMs);
+}
+
+void ShellSpaceProcessor::timerCallback()
+{
+    stopTimer();
+
     if (bodyDirty.exchange (false))  reloadBodyIR();
     if (spaceDirty.exchange (false)) reloadSpaceIR();
 }
