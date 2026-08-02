@@ -42,7 +42,43 @@ foreach ($p in $paths) {
     Write-Host ("  {0}" -f $p.Path)
 
     if (-not (Test-Path $p.Path)) { Write-Host "  -> フォルダ自体がありません" -ForegroundColor DarkGray; continue }
-    if (-not (Test-Path $bundle)) { Write-Host "  -> ShellSpace.vst3 がありません" -ForegroundColor DarkGray; continue }
+
+    # このフォルダに何が入っているかを全部出す。
+    # 「VST3に置いた」と思っていても階層が1つ深いことがあるので、目で確認できるようにする。
+    $entries = Get-ChildItem $p.Path -Force -EA SilentlyContinue
+    if ($entries) {
+        Write-Host "  中身:" -ForegroundColor DarkGray
+        foreach ($e in $entries) {
+            $kind = if ($e.PSIsContainer) { '[フォルダ]' } else { '[ファイル]' }
+            Write-Host ("    {0} {1}" -f $kind, $e.Name) -ForegroundColor DarkGray
+        }
+    } else {
+        Write-Host "  中身: (空)" -ForegroundColor DarkGray
+    }
+
+    if (-not (Test-Path $bundle)) {
+        # 直下に無くても、深い階層に置かれている可能性がある
+        $deep = Get-ChildItem $p.Path -Recurse -Force -Filter 'ShellSpace.vst3' -Depth 4 -EA SilentlyContinue |
+                Select-Object -First 5
+        if ($deep) {
+            Write-Host "  -> [NG] 直下にはありませんが、深い階層に見つかりました:" -ForegroundColor Red
+            foreach ($d in $deep) { Write-Host ("       {0}" -f $d.FullName) -ForegroundColor Yellow }
+            Write-Host "       DAWによっては深い階層を走査しません。" -ForegroundColor Yellow
+            Write-Host ("       ShellSpace.vst3 フォルダを {0} の『直下』へ移動してください。" -f $p.Path) -ForegroundColor Yellow
+            foreach ($d in $deep) {
+                $dd = Get-Item $d.FullName -Force
+                if ($dd.PSIsContainer) {
+                    $inner = Join-Path $d.FullName 'Contents\x86_64-win\ShellSpace.vst3'
+                    if (Test-Path $inner) { $found += @{ Dll = $inner; Layout = 'bundle(deep)' } }
+                } else {
+                    $found += @{ Dll = $d.FullName; Layout = 'single-file(deep)' }
+                }
+            }
+        } else {
+            Write-Host "  -> ShellSpace.vst3 がありません" -ForegroundColor DarkGray
+        }
+        continue
+    }
 
     $item = Get-Item $bundle -Force
 
