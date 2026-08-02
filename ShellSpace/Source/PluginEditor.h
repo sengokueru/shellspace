@@ -58,8 +58,9 @@ private:
     ShellSpaceProcessor& proc;
 
     juce::ComboBox presetBox;
-    juce::ComboBox bodyType, spaceType;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> bodyTypeAtt, spaceTypeAtt;
+    juce::ComboBox bodyType, bodyMaterial, bodyKit, spaceType;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment>
+        bodyTypeAtt, bodyMaterialAtt, bodyKitAtt, spaceTypeAtt;
 
     juce::TextButton bodyIRButton, spaceIRButton;
     juce::ToggleButton trueStereoToggle { "True St." };
@@ -76,6 +77,7 @@ private:
 
     std::unique_ptr<juce::FileChooser> chooser;
     int lastProgram { -1 };
+    int lastBodyType { -1 };
     juce::String lastStatus;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ShellSpaceEditor)

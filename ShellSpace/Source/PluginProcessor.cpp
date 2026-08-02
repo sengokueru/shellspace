@@ -6,9 +6,20 @@
 
 namespace
 {
-    const char* kBodyFiles[]  = { "Shell_Kick_body.wav",
-                                  "Shell_Snare_body.wav",
-                                  "Shell_Tom_body.wav" };
+    const char* kBodyKinds[]    = { "Kick", "Snare", "Tom" };
+    const char* kBodyMaterials[] = { "Maple", "Birch", "Mahogany", "Oak" };
+    const char* kBodyKits[]      = { "RecordingCustom", "LiveCustom",
+                                     "StageCustom", "TourCustom" };
+
+    juce::String builtInBodyFile (int type, int material, int kit)
+    {
+        if (type == 3) return "Cab_Marshall1960A_4x12.wav";
+        if (type == 4) return "Cab_AmpegSVT810E_8x10.wav";
+
+        return "Shell_" + juce::String (kBodyKinds[juce::jlimit (0, 2, type)])
+             + "_" + kBodyMaterials[juce::jlimit (0, 3, material)]
+             + "_" + kBodyKits[juce::jlimit (0, 3, kit)] + ".wav";
+    }
 
     const char* kSpaceFiles[] = { "Hall_Yokosuka-type_Full_Stereo.wav",
                                   "Hall_Yokosuka-type_Drum_Stereo.wav" };
@@ -56,7 +67,7 @@ namespace
     struct Preset
     {
         const char* name;
-        float bodyType, bodyTune, bodyLevel;
+        float bodyType, bodyMaterial, bodyKit, bodyTune, bodyLevel;
         float spaceType, spacePre, spaceLevel, trueStereo;
         float hpf, dry, out;
     };
@@ -64,14 +75,16 @@ namespace
     // 値は正規化(0..1)。dB系は (値+60)/72、dryは (値+60)/66。
     const Preset kPresets[] =
     {
-        // name                bType bTune bLevel  sType  sPre  sLevel  TS    hpf   dry    out
-        { "Init",              0.0f, 0.5f, 0.000f, 1.0f, 0.167f, 0.000f, 0.0f, 0.0f, 0.909f, 0.5f },
-        { "Kick Body",         0.0f, 0.5f, 0.556f, 1.0f, 0.167f, 0.000f, 0.0f, 0.0f, 0.909f, 0.5f },
-        { "Snare Body",        0.5f, 0.5f, 0.556f, 1.0f, 0.167f, 0.000f, 0.0f, 0.0f, 0.909f, 0.5f },
-        { "Tom Body",          1.0f, 0.5f, 0.583f, 1.0f, 0.167f, 0.000f, 0.0f, 0.0f, 0.909f, 0.5f },
-        { "Drum Hall (Send)",  0.0f, 0.5f, 0.000f, 1.0f, 0.250f, 0.833f, 1.0f, 0.35f, 0.000f, 0.5f },
-        { "Full Hall (Send)",  0.0f, 0.5f, 0.000f, 0.0f, 0.167f, 0.833f, 1.0f, 0.0f, 0.000f, 0.5f },
-        { "Body + Hall",       0.0f, 0.5f, 0.500f, 1.0f, 0.250f, 0.472f, 1.0f, 0.30f, 0.909f, 0.5f },
+        // name                type mat    kit   tune level  space pre    level  TS    hpf   dry    out
+        { "Init",              0.0f, 0.333f, 0.0f, 0.5f, 0.000f, 1.0f, 0.167f, 0.000f, 0.0f, 0.0f, 0.909f, 0.5f },
+        { "Kick Body",         0.0f, 0.333f, 0.0f, 0.5f, 0.556f, 1.0f, 0.167f, 0.000f, 0.0f, 0.0f, 0.909f, 0.5f },
+        { "Snare Body",       0.25f, 0.333f, 0.0f, 0.5f, 0.556f, 1.0f, 0.167f, 0.000f, 0.0f, 0.0f, 0.909f, 0.5f },
+        { "Tom Body",         0.50f, 0.333f, 0.0f, 0.5f, 0.583f, 1.0f, 0.167f, 0.000f, 0.0f, 0.0f, 0.909f, 0.5f },
+        { "Guitar 1960A",     0.75f, 0.333f, 0.0f, 0.5f, 0.833f, 1.0f, 0.167f, 0.000f, 0.0f, 0.0f, 0.909f, 0.5f },
+        { "Bass SVT-810E",    1.00f, 0.333f, 0.0f, 0.5f, 0.833f, 1.0f, 0.167f, 0.000f, 0.0f, 0.0f, 0.909f, 0.5f },
+        { "Drum Hall (Send)",  0.0f, 0.333f, 0.0f, 0.5f, 0.000f, 1.0f, 0.250f, 0.833f, 1.0f, 0.35f, 0.000f, 0.5f },
+        { "Full Hall (Send)",  0.0f, 0.333f, 0.0f, 0.5f, 0.000f, 0.0f, 0.167f, 0.833f, 1.0f, 0.0f, 0.000f, 0.5f },
+        { "Body + Hall",       0.0f, 0.333f, 0.0f, 0.5f, 0.500f, 1.0f, 0.250f, 0.472f, 1.0f, 0.30f, 0.909f, 0.5f },
     };
 
     constexpr int kNumPresets = (int) (sizeof (kPresets) / sizeof (Preset));
@@ -85,7 +98,15 @@ juce::AudioProcessorValueTreeState::ParameterLayout ShellSpaceProcessor::createL
 
     layout.add (std::make_unique<AudioParameterChoice> (
         ParameterID { "bodyType", 1 }, "Body Type",
-        StringArray { "Kick", "Snare", "Tom" }, 0));
+        StringArray { "Kick", "Snare", "Tom", "Guitar 1960A 4x12", "Bass Ampeg 8x10" }, 0));
+
+    layout.add (std::make_unique<AudioParameterChoice> (
+        ParameterID { "bodyMaterial", 1 }, "Shell Material",
+        StringArray { "Maple", "Birch", "Mahogany", "Oak" }, 1));
+
+    layout.add (std::make_unique<AudioParameterChoice> (
+        ParameterID { "bodyKit", 1 }, "Kit Model",
+        StringArray { "Recording Custom", "Live Custom", "Stage Custom", "Tour Custom" }, 0));
 
     layout.add (std::make_unique<AudioParameterFloat> (
         ParameterID { "bodyTune", 1 }, "Body Tune",
@@ -153,19 +174,20 @@ ShellSpaceProcessor::ShellSpaceProcessor()
 {
     formatManager.registerBasicFormats();
 
-    for (auto* id : { "bodyType", "bodyTune", "spaceType", "trueStereo" })
+    for (auto* id : { "bodyType", "bodyMaterial", "bodyKit", "bodyTune", "spaceType", "trueStereo" })
         apvts.addParameterListener (id, this);
 }
 
 ShellSpaceProcessor::~ShellSpaceProcessor()
 {
-    for (auto* id : { "bodyType", "bodyTune", "spaceType", "trueStereo" })
+    for (auto* id : { "bodyType", "bodyMaterial", "bodyKit", "bodyTune", "spaceType", "trueStereo" })
         apvts.removeParameterListener (id, this);
 }
 
 void ShellSpaceProcessor::parameterChanged (const juce::String& id, float)
 {
-    if (id == "bodyType" || id == "bodyTune")   bodyDirty  = true;
+    if (id == "bodyType" || id == "bodyMaterial" || id == "bodyKit" || id == "bodyTune")
+        bodyDirty = true;
     if (id == "spaceType" || id == "trueStereo") spaceDirty = true;
     triggerAsyncUpdate();
 }
@@ -194,7 +216,8 @@ void ShellSpaceProcessor::setCurrentProgram (int index)
     const auto& p = kPresets[index];
 
     struct { const char* id; float v; } values[] = {
-        { "bodyType",   p.bodyType   }, { "bodyTune",  p.bodyTune  },
+        { "bodyType",   p.bodyType   }, { "bodyMaterial", p.bodyMaterial },
+        { "bodyKit",    p.bodyKit    }, { "bodyTune",  p.bodyTune  },
         { "bodyLevel",  p.bodyLevel  }, { "spaceType", p.spaceType },
         { "spacePre",   p.spacePre   }, { "spaceLevel", p.spaceLevel },
         { "trueStereo", p.trueStereo }, { "hpf",       p.hpf       },
@@ -289,11 +312,14 @@ juce::AudioBuffer<float> ShellSpaceProcessor::readIR (const juce::File& userFile
 void ShellSpaceProcessor::reloadBodyIR()
 {
     const int index = (int) apvts.getRawParameterValue ("bodyType")->load();
+    const int material = (int) apvts.getRawParameterValue ("bodyMaterial")->load();
+    const int kit = (int) apvts.getRawParameterValue ("bodyKit")->load();
     const float semitones = apvts.getRawParameterValue ("bodyTune")->load();
 
     double irRate = 48000.0;
     juce::String err;
-    auto src = readIR (getUserIR (true), kBodyFiles[juce::jlimit (0, 2, index)], irRate, err);
+    auto src = readIR (getUserIR (true), builtInBodyFile (juce::jlimit (0, 4, index), material, kit),
+                       irRate, err);
 
     {
         const juce::ScopedLock sl (errorLock);

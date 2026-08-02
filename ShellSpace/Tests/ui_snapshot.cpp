@@ -10,6 +10,7 @@
 #include "../Source/PluginEditor.h"
 
 #include <iostream>
+#include <functional>
 
 int main (int argc, char** argv)
 {
@@ -54,6 +55,21 @@ int main (int argc, char** argv)
                   << " 下" << (childUnion.getBottom() - frame.getBottom()) << std::endl;
     }
 
+    int editableDbLabels = 0;
+    std::function<void (juce::Component*)> countEditable = [&] (juce::Component* parent)
+    {
+        for (auto* child : parent->getChildren())
+        {
+            if (auto* fader = dynamic_cast<Fader*> (child);
+                fader != nullptr && fader->value.isEditableOnDoubleClick())
+                ++editableDbLabels;
+            countEditable (child);
+        }
+    };
+    countEditable (editor.get());
+    std::cout << (editableDbLabels == 4 ? "[OK]   " : "[FAIL] ")
+              << "dB数値入力ラベル: " << editableDbLabels << "/4" << std::endl;
+
     // 重なりの検出（ノブ同士が被っていたらレイアウトミス）
     auto kids = editor->getChildren();
     for (int i = 0; i < kids.size(); ++i)
@@ -76,7 +92,7 @@ int main (int argc, char** argv)
             stream->flush();
             std::cout << "[OK]   wrote " << out.getFullPathName()
                       << "  (" << image.getWidth() << "x" << image.getHeight() << ")" << std::endl;
-            return 0;
+            return fits && editableDbLabels == 4 ? 0 : 1;
         }
     }
 

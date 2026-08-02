@@ -233,7 +233,7 @@ int main (int argc, char** argv)
 
     std::cout << "\n== パラメータ ==" << std::endl;
     const juce::StringArray expected {
-        "Body Type", "Body Tune", "Body Level",
+        "Body Type", "Shell Material", "Kit Model", "Body Tune", "Body Level",
         "Space Type", "Predelay", "Space Level",
         "Wet HPF", "Dry", "Output" };
 
@@ -253,8 +253,8 @@ int main (int argc, char** argv)
     if (auto* ed = instance->createEditorIfNeeded())
     {
         std::cout << "  size: " << ed->getWidth() << " x " << ed->getHeight() << std::endl;
-        check (ed->getWidth() == 448 && ed->getHeight() == 518,
-               "エディタサイズが 448x518 で伝わる",
+        check (ed->getWidth() == 448 && ed->getHeight() == 550,
+               "エディタサイズが 448x550 で伝わる",
                juce::String (ed->getWidth()) + "x" + juce::String (ed->getHeight()));
         delete ed;   // デストラクタが editorBeingDeleted を呼ぶ
     }
@@ -311,6 +311,47 @@ int main (int argc, char** argv)
            "ratio=" + juce::String (hzRatio, 3));
     check (decayRatio < 0.8, "減衰も短くなる（IR全体が縮んでいる）",
            "ratio=" + juce::String (decayRatio, 3));
+
+    // ---- 胴材とキット特性を同時に切り替える -------------------------------
+    std::cout << "\n== BODY (Mahogany / Tour Custom) ==" << std::endl;
+    setParam (*instance, "Body Tune",     0.5f);
+    setParam (*instance, "Shell Material", 2.0f / 3.0f); // Mahogany
+    setParam (*instance, "Kit Model",      1.0f);         // Tour Custom
+    pump (2000);
+
+    auto warmBody = captureImpulseResponse (*instance);
+    auto warmMeasure = measure (warmBody);
+    const double warmHz = dominantHz (warmBody);
+    std::cout << "  基音=" << std::setprecision (1) << warmHz << "Hz"
+              << "  -20dB=" << std::setprecision (2) << warmMeasure.decayMs << "ms" << std::endl;
+    check (warmMeasure.peak > 0.001f, "胴材／キット変更後も音が出る");
+    check (warmHz < hz0, "Mahogany/TourはBirch/Recordingより基音が低い",
+           juce::String (warmHz, 1) + " < " + juce::String (hz0, 1));
+    check (warmMeasure.decayMs > kick0.decayMs,
+           "Mahogany/TourはBirch/Recordingより減衰が長い");
+
+    // ---- キャビネット2種 --------------------------------------------------
+    std::cout << "\n== BODY (Guitar 1960A 4x12) ==" << std::endl;
+    setParam (*instance, "Body Type", 0.75f);
+    pump (2000);
+    auto guitarCab = captureImpulseResponse (*instance);
+    const double guitarPeakHz = dominantHz (guitarCab);
+    check (measure (guitarCab).peak > 0.001f, "Marshall 1960A型キャビIRから音が出る");
+    check (guitarPeakHz > 80.0 && guitarPeakHz < 5000.0,
+           "ギターキャビの主成分が80Hz〜5kHzにある",
+           juce::String (guitarPeakHz, 1) + "Hz");
+
+    std::cout << "\n== BODY (Bass Ampeg 8x10) ==" << std::endl;
+    setParam (*instance, "Body Type", 1.0f);
+    pump (2000);
+    auto bassCab = captureImpulseResponse (*instance);
+    const double bassPeakHz = dominantHz (bassCab);
+    check (measure (bassCab).peak > 0.001f, "Ampeg SVT-810E型キャビIRから音が出る");
+    check (bassPeakHz > 35.0 && bassPeakHz < 5000.0,
+           "ベースキャビの主成分が40Hz近傍〜5kHzにある",
+           juce::String (bassPeakHz, 1) + "Hz");
+    check (std::abs (guitarPeakHz - bassPeakHz) > 20.0,
+           "ギター／ベースキャビで周波数特性が異なる");
 
     // ---- SPACE だけ鳴らす -------------------------------------------------
     std::cout << "\n== SPACE (Hall Drum, Predelay 40ms) ==" << std::endl;

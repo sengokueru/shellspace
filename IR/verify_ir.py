@@ -62,6 +62,21 @@ for p in sorted(glob.glob(os.path.join(D, '*.wav'))):
                   '  '.join(f'{n}={v:+.1f}' for n, v in zip(names, e)))
             print(f'   同側優位 LL>LR:{e[0]>e[1]}  RR>RL:{e[3]>e[2]}'
                   f'   左右対称(±1.5dB):{abs(e[0]-e[3])<1.5 and abs(e[1]-e[2])<1.5}')
+    elif 'Cab_' in p:
+        F = np.abs(np.fft.rfft(mono)) + 1e-30
+        f = np.fft.rfftfreq(len(mono), 1 / SR)
+        ref = np.interp(1000, f, F)
+        points = [40, 58, 80, 85, 110, 1000, 3000, 5000, 8000]
+        vals = [20 * np.log10(np.interp(hz, f, F) / ref) for hz in points]
+        print('   1kHz基準:', '  '.join(f'{hz:>4}Hz={db:+5.1f}dB'
+                                      for hz, db in zip(points, vals)))
+        print(f'   L/R一致(mono安全): {np.allclose(x[:,0], x[:,1])}')
+        if 'Marshall' in p:
+            print(f'   G12T-75帯域(80Hz-5kHz): '
+                  f'{vals[2] > -15 and vals[7] > -20}  8kHz減衰: {vals[8] < -20}')
+        else:
+            print(f'   SVT-810E低域(40Hz≈-10dB): {abs((vals[0]-vals[4]) + 10) < 4}  '
+                  f'5kHzまで有効: {vals[7] > -10}')
     else:
         F = np.abs(np.fft.rfft(mono * np.hanning(len(mono))))
         f = np.fft.rfftfreq(len(mono), 1 / SR)
