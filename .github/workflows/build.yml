@@ -80,7 +80,7 @@ jobs:
           fi
           cp IR/*.wav dist/IR/
           cp README.md dist/
-          cp ShellSpace/check-install.ps1 dist/
+          cp check-install.ps1 dist/
 
       - name: Validate VST3 with pluginval
         shell: bash
