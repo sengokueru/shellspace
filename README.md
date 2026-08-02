@@ -32,14 +32,44 @@ Level 系は既定が **-60dB（＝切）**。挿しただけでは音が変わ�
 
 ## インストール
 
-`ShellSpace.vst3` は**フォルダ**（VST3 はバンドル形式）。まるごとコピーする。
+**手順を1つでも飛ばすと DAW に出てこない。**
 
-| コピー先 | 権限 |
-|---|---|
-| `%LOCALAPPDATA%\Programs\Common\VST3\` | **不要。こちらを推奨** |
-| `C:\Program Files\Common Files\VST3\` | 管理者権限が必要 |
+1. **zip のブロックを解除してから展開する。** ネットから落とした zip は Windows が
+   ブロック扱いにすることがあり、そのまま展開すると中の DLL が読み込めない。
+   右クリック → プロパティ → 「許可する」があればチェック → **そのあとで展開**。
 
-そのあと DAW でプラグインを再スキャン。メーカー名 `Yokosuka`、プラグイン名 `ShellSpace`。
+2. **`ShellSpace.vst3` フォルダをまるごとコピーする。** VST3 はバンドル形式。
+
+   ```
+   ShellSpace.vst3\          ← これをコピー（フォルダ）
+     Contents\
+       x86_64-win\
+         ShellSpace.vst3     ← これは中身。同じ名前のファイルなので間違えやすい
+   ```
+
+   **中の DLL だけをコピーすると認識されない。**
+
+3. コピー先:
+
+   | コピー先 | |
+   |---|---|
+   | `C:\Program Files\Common Files\VST3\` | **推奨。** 規格上の正式な場所で、すべての DAW が必ず走査する（管理者権限が必要） |
+   | `%LOCALAPPDATA%\Programs\Common\VST3\` | 権限不要だが、**後から追加された場所なので古い DAW は見に行かない** |
+
+4. DAW で再スキャン。メーカー名 `Yokosuka`、プラグイン名 `ShellSpace`。
+
+5. **出てこないときは Blocklist を確認する。** 一度読み込みに失敗したプラグインは
+   Cubase がブロックリストに入れ、以後どれだけ再スキャンしても無視する。
+   `スタジオ > VST プラグインマネージャー > Blocklist` から再有効化する。
+
+### 診断スクリプト
+
+配置・構造・ブロック状態を自動で調べる。何も書き換えない。
+
+```powershell
+.\check-install.ps1          # 診断のみ
+.\check-install.ps1 -Fix     # Mark of the Web のブロックを解除する
+```
 
 ## IR について
 
