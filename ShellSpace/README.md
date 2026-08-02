@@ -1,0 +1,170 @@
+# ShellSpace — コンボリューションVST3
+
+胴鳴り（BODY）とホール（SPACE）を**並列**に走らせるコンボリューション。
+[../IR](../IR) で作ったIRをプラグインに埋め込むので、単体で完結する。
+
+- 形式: **VST3 / Windows x64**
+- フレームワーク: JUCE（`juce::dsp::Convolution` = 分割FFT畳み込み）
+
+## 信号の流れ
+
+```
+IN ─┬─────────────────────────── DRY ──────────────┐
+    │                                              │
+    ├─→ [BODY conv] ──→ ×Level ─┐                  ├─→ ×Output → OUT
+    │                           ├─→ Σ → [Wet HPF] ─┘
+    └─→ [Predelay] → [SPACE conv] → ×Level ─┘
+```
+
+BODYとSPACEが**直列ではなく並列**なのが要点。胴鳴りがホールに突っ込まれて濁らない。
+HPFは**WETだけ**に掛かるので、原音の低域を削らずに残響の溜まりだけ切れる。
+
+## パラメータ
+
+| セクション | パラメータ | 範囲 | 既定 | 備考 |
+|---|---|---|---|---|
+| BODY | Type | Kick / Snare / Tom | Kick | 埋め込みIRを切替 |
+| BODY | Tune | -12〜+12 半音 | 0 | **IRを時間軸ごと伸縮**。実機のチューニングと同じ挙動（減衰も同比率で変わる） |
+| BODY | Level | -60〜+12 dB | -60（切） | |
+| SPACE | Type | Hall Full / Hall Drum | Hall Drum | Drumは低域を締めた版 |
+| SPACE | Predelay | 0〜120 ms | 20 | IR自体も最初の反射が約10msにある |
+| SPACE | Level | -60〜+12 dB | -60（切） | |
+| 共通 | Wet HPF | 20〜400 Hz | 20 | WET側のみ |
+| 共通 | Dry | -60〜+6 dB | 0 | |
+| 共通 | Output | -24〜+24 dB | 0 | |
+
+Level系は既定が **-60dB（＝無音）**。挿しただけでは音が変わらないので、
+使う側から上げていく。
+
+## ビルド
+
+必要なもの:
+- Visual Studio 2022 **Build Tools**（C++ワークロード + Windows SDK）
+- CMake 3.22 以上
+- JUCE（既定では `C:/Users/user/JUCE`。別の場所なら `-DJUCE_PATH=...`）
+- Python + numpy（IR生成用）
+
+```powershell
+.\build.ps1
+```
+
+`build.ps1` はIRが無ければ `make_ir.py` を先に走らせる。
+ビルドが通ると `COPY_PLUGIN_AFTER_BUILD` で
+`C:\Program Files\Common Files\VST3\ShellSpace.vst3` に自動配置される。
+Cubaseはプラグインマネージャーで再スキャンが必要。
+
+手で叩く場合:
+
+```powershell
+cmake -B build -S . -G "Visual Studio 17 2022" -A x64
+cmake --build build --config Release
+```
+
+## 検証
+
+`Tests/host_test.cpp` が検証ホスト。ビルドしたVST3を**実際にロードして音を通し、出力を測る**。
+「ビルドが通った」「VST3として読める」と「音が出る」は別物なので、ここまでやって確認とする。
+
+```powershell
+.\build\ShellSpaceTest_artefacts\Release\ShellSpaceTest.exe `
+  "$env:LOCALAPPDATA\Programs\Common\VST3\ShellSpace.vst3"
+```
+
+### 実測結果（2026-08-02 / ALL PASSED）
+
+| 項目 | 実測 | 判定 |
+|---|---|---|
+| VST3として認識・インスタンス生成 | in=2 out=2 | ✅ |
+| パラメータ9個の登録 | 既定値も期待どおり | ✅ |
+| BODY (Kick) の基音 | **49.8 Hz** | ✅ 設計値49Hzのモードと一致 |
+| BODY の減衰 (-20dB) | 138.7 ms | ✅ |
+| **Tune +12半音での基音** | **98.1 Hz（比 1.971）** | ✅ 理論値2.0 |
+| Tune +12半音での減衰比 | **0.500** | ✅ IRが正確に半分に縮んでいる |
+| SPACE Predelay 40ms の立ち上がり | **43.4 ms** | ✅ |
+| SPACE の残響 (-20dB) | 410.9 ms | ✅ |
+| 全Level -60dB で無音 | peak 0.000000 | ✅ |
+
+**測定時の注意**: キャプチャ前に `reset()` と数秒の無音送出で内部状態を吐き出すこと。
+ホールIRは2.9秒あるので、これを怠ると前のテストの残響が次のテストの頭から出てきて
+「プリディレイが効いていない」という**偽のバグ**に見える。実際にこれで一度騙された。
+
+## UI
+
+322 × 418 px。上から BODY / SPACE / OUTPUT の3セクション。
+
+```
+ShellSpace              convolution / body + hall
+┌────────────────────────────────────────┐
+│ BODY          TUNE        LEVEL         │
+│  [Kick ▾]      ◯           ◯            │
+│               0.00       -60.0          │
+├────────────────────────────────────────┤
+│ SPACE       PREDELAY      LEVEL         │
+│  [Hall Drum ▾] ◯           ◯            │
+│               20.0       -60.0          │
+├────────────────────────────────────────┤
+│ OUTPUT   WET HPF   DRY     OUTPUT       │
+│            ◯       ◯        ◯           │
+│           20      0.0      0.0          │
+└────────────────────────────────────────┘
+```
+
+### 実ホストで触るには（Cubaseが手元に無いとき）
+
+JUCE同梱の **AudioPluginHost** を使う。VST3 SDK の Plug-in Test Host と違い、
+ダウンロードもライセンス同意も不要（JUCEに入っている）。
+
+```powershell
+# 初回だけビルド（extras は JUCE ルートから JUCE_BUILD_EXTRAS=ON で構成する。
+# extras/AudioPluginHost を単体で configure すると juce_add_gui_app が無くて失敗する）
+cmake -B C:\ws\aph-build -S C:\Users\user\JUCE -G "Visual Studio 17 2022" -A x64 -DJUCE_BUILD_EXTRAS=ON
+cmake --build C:\ws\aph-build --config Release --target AudioPluginHost
+
+# 起動
+C:\ws\aph-build\extras\AudioPluginHost\AudioPluginHost_artefacts\Release\AudioPluginHost.exe
+```
+
+起動後: `Options > Edit the List of Available Plug-ins` → `Options > Scan for new or updated VST3 plug-ins`
+→ グラフ上で右クリックして ShellSpace を追加 → ダブルクリックでエディタが開く。
+
+VST3規格の適合テスト（conformity tests）が要る場合だけ、Steinbergの VST3 SDK に同梱の
+VST3PluginTestHost を検討する。AudioPluginHost にその機能は無い。
+
+### UIを見るには
+
+**座標を手で組んだレイアウトを、見ずに「こうなっているはず」と言わないこと。**
+実際に描画してPNGに出すツールがある。
+
+```powershell
+.\build\ShellSpaceUI_artefacts\Release\ShellSpaceUI.exe shellspace_ui.png
+```
+
+エディタのサイズ・子要素の外接矩形・はみ出し量・要素の重なりも同時に出力する。
+VST3経由ではなくプラグインのソースを直接リンクしている
+（VST3のエディタはネイティブ子ウィンドウなので、ホスト経由ではスナップショットが取れない）。
+
+初回はこれで2つバグが見つかった:
+- 下段のノブがウィンドウ外にはみ出していた（paint と resized で別々に座標を書いていたのが原因。
+  いまは `sectionBounds()` を両方が共有する）
+- **コンボボックスが空だった。** `ComboBoxAttachment` は項目を作ってくれない。
+  `addItemList()` で入れてからアタッチする必要がある。
+  そのためアタッチメントは `unique_ptr` にして、コンストラクタ本体で生成している。
+
+## 設計上の割り切り
+
+- **True Stereo（4ch IR）は未対応。** 2chのStereo版IRを埋め込んでいる。
+  4chを扱うには畳み込みを4系統に増やす必要があり、v1では入れていない。
+  True Stereoが要るときは REVerence に `Hall_..._TrueStereo.wav` を読ませるほうが早い。
+- BODYのIRはデュアルモノなので、モノ互換で位相が崩れない。
+- Tune変更時はIRを再構築して `loadImpulseResponse` に渡す。JUCE側が
+  バックグラウンドで差し替えるので音は途切れないが、**オートメーションで
+  高速に動かす用途は想定していない**。
+
+## IRを差し替えたいとき
+
+1. `../IR/make_ir.py` を編集して wav を作り直す
+2. `.\build.ps1` で再ビルド（wavはバイナリ埋め込みなので再ビルドが要る）
+
+埋め込むファイルは `CMakeLists.txt` の `IR_FILES` で決まる。
+増やす場合は `Source/PluginProcessor.cpp` の `kBodyFiles` / `kSpaceFiles` と
+`createLayout()` の選択肢も揃えること。

@@ -1,2 +1,118 @@
-# shellspace
-ドラムの胴鳴りとホール残響を並列に足すコンボリューションVST3プラグイン (JUCE / Windows)
+# ShellSpace
+
+ドラムの**胴鳴り**とホールの**残響**を並列に足すコンボリューション VST3 プラグイン。
+
+- 形式: **VST3 / Windows x64**
+- フレームワーク: [JUCE](https://juce.com/) 8
+- Visual C++ 再頒布可能パッケージは**不要**（CRT を静的リンク済み）
+
+**[→ ダウンロード（Releases）](../../releases/latest)**
+
+```
+IN ─┬──────────────────────────── DRY ──────────────┐
+    │                                                │
+    ├─→ [BODY conv] ─────→ ×Level ─┐               ├─→ ×Output → OUT
+    │                              ├─→ Σ → [Wet HPF]┘
+    └─→ [Predelay] → [SPACE conv] → ×Level ─┘
+```
+
+BODY と SPACE が**直列ではなく並列**なのが要点。直列だと胴鳴りがホールに突っ込まれて濁る。
+Wet HPF は **WET 側だけ**に掛かるので、原音の低域を削らずに残響の溜まりだけ切れる。
+
+## 機能
+
+| | |
+|---|---|
+| **BODY** | キック / スネア / タムの胴鳴り。**Tune** は IR を時間軸ごと伸縮させるので、実機のチューニングと同じ挙動（減衰も同じ比率で変わる） |
+| **SPACE** | 天井の高いオペラハウス型ホール。Full / ドラム用（低域を締めた版）。**True Stereo**（4ch IR）対応 |
+| **IR 差し替え** | 各セクションから自分の wav を読み込める。パスはプロジェクトに保存される |
+| **プリセット** | 7 種 |
+
+Level 系は既定が **-60dB（＝切）**。挿しただけでは音が変わらない。
+
+## インストール
+
+`ShellSpace.vst3` は**フォルダ**（VST3 はバンドル形式）。まるごとコピーする。
+
+| コピー先 | 権限 |
+|---|---|
+| `%LOCALAPPDATA%\Programs\Common\VST3\` | **不要。こちらを推奨** |
+| `C:\Program Files\Common Files\VST3\` | 管理者権限が必要 |
+
+そのあと DAW でプラグインを再スキャン。メーカー名 `Yokosuka`、プラグイン名 `ShellSpace`。
+
+## IR について
+
+`IR/` は**生成スクリプト**。wav は生成物なのでリポジトリには入れていない。
+
+```bash
+py -3 IR/make_ir.py IR        # 生成
+py -3 IR/verify_ir.py IR      # 実測検証（RT60・ピーク・モード・ch順）
+```
+
+生成される wav は **Cubase の REVerence にそのまま読ませられる**（4ch 版は True Stereo として扱われる）。
+その場合 **ER Tail Split を 160ms** にすること。このホール IR の「上への広がり」は
+118 / 131 / 146ms に置いた**天井の 1 次反射**が作っているので、Split を 100ms などにすると
+天井がテール扱いになって効果が消える。
+
+> **ホール IR は現地で実測したものではない。**
+> 「馬蹄形で天井が高いホールはどう鳴るか」を設計して合成したもの。
+
+## ビルド
+
+必要なもの: Visual Studio 2022 Build Tools（C++ ワークロード）/ CMake 3.22+ / JUCE 8 / Python + numpy
+
+```powershell
+cd ShellSpace
+.\build.ps1
+```
+
+`build.ps1` は wav が無ければ `make_ir.py` を先に走らせる。
+
+> **パスに非 ASCII 文字があると JUCE の `juceaide` が `.rc` 生成で落ちる。**
+> `build.ps1` は日本語パスを検出すると `mklink /J` で ASCII のジャンクションを作って回避する。
+
+## 検証
+
+```powershell
+# DSP の頑健性（ブロック長・サンプルレート・チャンネル数）
+.\build\ShellSpaceDspTest_artefacts\Release\ShellSpaceDspTest.exe
+
+# VST3 として実ロードして音を通す
+.\build\ShellSpaceTest_artefacts\Release\ShellSpaceTest.exe "<path to .vst3>"
+
+# エディタを PNG に書き出す（はみ出し・要素の重なりも検査）
+.\build\ShellSpaceUI_artefacts\Release\ShellSpaceUI.exe ui.png
+```
+
+外部検証には [pluginval](https://github.com/Tracktion/pluginval) を strictness 10 で使用。
+
+### 実測値
+
+| 項目 | 実測 |
+|---|---|
+| キック胴鳴りの基音 | 49.8 Hz |
+| Tune +12 半音での基音 | 98.1 Hz（比 1.971 / 理論値 2.0） |
+| Tune +12 半音での減衰 | ×0.500 |
+| Predelay 40ms の立ち上がり | 43.4 ms |
+| ホールの残響（−20dB まで） | 410.9 ms |
+| 追加レイテンシ | 0（立ち上がり 0.02ms） |
+| ブロック長超過時 | 小ブロック処理と**ビット単位で一致** |
+| 44.1k / 48k / 96kHz・モノラル | すべて動作 |
+| pluginval strictness 10 | 6 シードすべて SUCCESS |
+
+**未検証**: DAW（Cubase 等）での実動作、高 DPI 表示、CPU 負荷、オートメーション、長時間動作。
+
+## 既知の制約
+
+- **Tune はオートメーション向きではない。** 値が変わるたびに IR を作り直す
+- **Predelay を動かすとクリックが出る可能性がある**（読み取り位置を即座に動かしている）
+- **Wet HPF のオートメーションで段付きノイズが出る可能性がある**（係数を補間していない）
+- 挿した直後のごく短い間、IR の読み込みが終わっていない可能性がある（別スレッドで読むため）
+
+## ライセンス
+
+JUCE を使用しているため、本リポジトリのソースは **AGPLv3** で公開する。
+JUCE 自体のライセンスは https://juce.com/get-juce/ を参照。
+
+VST3 は Steinberg Media Technologies GmbH の商標。
