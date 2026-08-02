@@ -449,6 +449,14 @@ void ShellSpaceProcessor::reloadSpaceIR()
 //==============================================================================
 void ShellSpaceProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
+    // Convolution::prepare() と loadImpulseResponse() を同時に走らせない。
+    // ホストがサンプルレートやブロック長を切り替えている最中に、パラメータ変更で
+    // メッセージスレッドから loadImpulseResponse が入ると、JUCEの内部キューが
+    // 壊れて空の std::function を呼び bad_function_call で abort する。
+    // CriticalSection は再入可能なので、この中で reloadBodyIR/reloadSpaceIR が
+    // 同じロックを取っても問題ない。
+    const juce::ScopedLock sl (irLoadLock);
+
     currentSampleRate = sampleRate;
 
     juce::dsp::ProcessSpec spec { sampleRate,
@@ -479,6 +487,9 @@ void ShellSpaceProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 
 void ShellSpaceProcessor::reset()
 {
+    // reset() も Convolution の内部状態を触るので、IRの差し替えと同時に走らせない。
+    const juce::ScopedLock sl (irLoadLock);
+
     // トランスポート移動時などに残響が残らないようにする。
     // これが無いと、切ってあったセクションのレベルを上げた瞬間に
     // 前の入力の尻尾が頭から出てくる。
