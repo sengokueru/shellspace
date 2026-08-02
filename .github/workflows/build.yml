@@ -1,0 +1,139 @@
+name: build
+
+# Windows と macOS のバイナリを作る。
+# 開発機が Windows なので、macOS 版はこのランナーが唯一の生成手段。
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            label: macOS (universal)
+            slug: macos
+          - os: windows-latest
+            label: Windows x64
+            slug: windows
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: numpy を入れる
+        run: python -m pip install --upgrade pip numpy
+
+      - name: IR を生成する
+        run: python IR/make_ir.py IR
+
+      - name: IR を検証する
+        run: python IR/verify_ir.py IR
+
+      # JUCE は FetchContent で取る。毎回クローンすると遅いのでキャッシュする
+      - name: JUCE をキャッシュ
+        uses: actions/cache@v4
+        with:
+          path: ShellSpace/build/_deps
+          key: juce-${{ matrix.slug }}-7dda739b9be09f1dfb9592a09e1701acf808cd44
+
+      - name: configure
+        run: >
+          cmake -B ShellSpace/build -S ShellSpace
+          -DCMAKE_BUILD_TYPE=Release
+          -DJUCE_PATH=fetch
+          -DSS_COPY_AFTER_BUILD=OFF
+
+      - name: build
+        run: cmake --build ShellSpace/build --config Release --parallel 3
+
+      - name: DSP検証を走らせる
+        shell: bash
+        run: |
+          exe=$(find ShellSpace/build -type f \
+                \( -name 'ShellSpaceDspTest' -o -name 'ShellSpaceDspTest.exe' \) \
+                -not -path '*/_deps/*' | head -1)
+          echo "running: $exe"
+          "$exe"
+
+      - name: 成果物を集める
+        shell: bash
+        run: |
+          mkdir -p dist
+          # VST3 / AU はバンドル(フォルダ)なので、丸ごとコピーする
+          find ShellSpace/build -maxdepth 6 -name 'ShellSpace.vst3' -not -path '*/_deps/*' \
+            -exec cp -R {} dist/ \; -quit
+          if [ "${{ matrix.slug }}" = "macos" ]; then
+            find ShellSpace/build -maxdepth 6 -name 'ShellSpace.component' -not -path '*/_deps/*' \
+              -exec cp -R {} dist/ \; -quit
+          fi
+          cp IR/*.wav dist/ 2>/dev/null || true
+          ls -la dist
+
+      # macOS は VST3 と AU で置き場所が別なので、pkg にすると手間が減る。
+      # 署名はしていないので Gatekeeper は止める（README に回避手順あり）。
+      - name: macOS の pkg を作る
+        if: matrix.slug == 'macos'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ver=0.3.0
+          mkdir -p pkgroot/vst3 pkgroot/au pkgparts
+
+          cp -R dist/ShellSpace.vst3      pkgroot/vst3/
+          cp -R dist/ShellSpace.component pkgroot/au/
+
+          pkgbuild --root pkgroot/vst3 \
+                   --identifier com.yokosuka.shellspace.vst3 \
+                   --version "$ver" \
+                   --install-location /Library/Audio/Plug-Ins/VST3 \
+                   pkgparts/vst3.pkg
+
+          pkgbuild --root pkgroot/au \
+                   --identifier com.yokosuka.shellspace.au \
+                   --version "$ver" \
+                   --install-location /Library/Audio/Plug-Ins/Components \
+                   pkgparts/au.pkg
+
+          cat > distribution.xml <<'XML'
+          <?xml version="1.0" encoding="utf-8"?>
+          <installer-gui-script minSpecVersion="2">
+            <title>ShellSpace</title>
+            <options customize="always" require-scripts="false" hostArchitectures="arm64,x86_64"/>
+            <choices-outline>
+              <line choice="vst3"/>
+              <line choice="au"/>
+            </choices-outline>
+            <choice id="vst3" title="VST3" description="Cubase / Studio One / Live など">
+              <pkg-ref id="com.yokosuka.shellspace.vst3"/>
+            </choice>
+            <choice id="au" title="Audio Unit" description="Logic Pro / GarageBand">
+              <pkg-ref id="com.yokosuka.shellspace.au"/>
+            </choice>
+            <pkg-ref id="com.yokosuka.shellspace.vst3">vst3.pkg</pkg-ref>
+            <pkg-ref id="com.yokosuka.shellspace.au">au.pkg</pkg-ref>
+          </installer-gui-script>
+          XML
+
+          productbuild --distribution distribution.xml \
+                       --package-path pkgparts \
+                       "dist/ShellSpace-${ver}-macOS.pkg"
+
+          ls -la dist
+
+      - name: アーティファクトを上げる
+        uses: actions/upload-artifact@v4
+        with:
+          name: ShellSpace-${{ matrix.slug }}
+          path: dist
+          if-no-files-found: error
