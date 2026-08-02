@@ -33,6 +33,20 @@ $paths = @(
     @{ Name = 'ユーザー用（新しめのDAWのみ走査）';   Path = "$env:LOCALAPPDATA\Programs\Common\VST3" }
 )
 
+# Cubase 12 には、標準の Common Files\VST3 を走査せず
+# 自身のインストール先の VST3 しか見ないことがある（既知の問題）。
+$daw = @()
+foreach ($root in @("$env:ProgramFiles\Steinberg", "${env:ProgramFiles(x86)}\Steinberg")) {
+    if (-not (Test-Path $root)) { continue }
+    Get-ChildItem $root -Directory -EA SilentlyContinue | ForEach-Object {
+        $v = Join-Path $_.FullName 'VST3'
+        if (Test-Path $v) {
+            $paths += @{ Name = ("DAW内部（{0}）" -f $_.Name); Path = $v }
+            $daw += @{ Name = $_.Name; Vst3 = $v }
+        }
+    }
+}
+
 $found = @()
 
 foreach ($p in $paths) {
@@ -141,6 +155,9 @@ if ($found.Count -eq 0) {
     Write-Host "zip の中の『ShellSpace.vst3 フォルダ』を、次の場所へまるごとコピーしてください:" -ForegroundColor Yellow
     Write-Host ""
     Write-Host ("  {0}" -f "$env:CommonProgramFiles\VST3") -ForegroundColor Green
+    foreach ($d in $daw) {
+        Write-Host ("  {0}   ← {1} 用。こちらにも置くと確実" -f $d.Vst3, $d.Name) -ForegroundColor Green
+    }
     Write-Host ""
     Write-Host "エクスプローラーのアドレス欄に次を貼れば、その場所が直接開きます:" -ForegroundColor Yellow
     Write-Host "  %CommonProgramFiles%\VST3" -ForegroundColor Green
@@ -216,14 +233,25 @@ foreach ($f in $found) {
 
 # ---- DAW の情報 ----
 Write-Head "DAW"
-$cubase = @()
+$anyDaw = $false
 foreach ($root in @("$env:ProgramFiles\Steinberg", "${env:ProgramFiles(x86)}\Steinberg")) {
-    if (Test-Path $root) {
-        Get-ChildItem $root -Directory -EA SilentlyContinue | ForEach-Object { $cubase += $_.Name }
+    if (-not (Test-Path $root)) { continue }
+    Get-ChildItem $root -Directory -EA SilentlyContinue | ForEach-Object {
+        $anyDaw = $true
+        $exe = Get-ChildItem $_.FullName -Filter '*.exe' -EA SilentlyContinue | Select-Object -First 1
+        $ver = if ($exe) { $exe.VersionInfo.ProductVersion } else { '' }
+        Write-Host ("  {0}  {1}" -f $_.Name, $ver)
     }
 }
-if ($cubase) { $cubase | Sort-Object -Unique | ForEach-Object { Write-Host ("  {0}" -f $_) } }
-else { Write-Host "  Steinberg 製品は見つかりませんでした（別の場所にある可能性あり）" -ForegroundColor DarkGray }
+if (-not $anyDaw) { Write-Host "  Steinberg 製品は見つかりませんでした（別の場所にある可能性あり）" -ForegroundColor DarkGray }
+
+if ($daw | Where-Object { $_.Name -match 'Cubase 12' }) {
+    Write-Host ""
+    Write-Host "  ★ Cubase 12 には、標準の Common Files\VST3 を走査せず" -ForegroundColor Yellow
+    Write-Host "     自身の VST3 フォルダしか見ないことがある既知の問題があります。" -ForegroundColor Yellow
+    Write-Host "     出てこない場合は、上記の DAW内部 VST3 フォルダにも置いてください。" -ForegroundColor Yellow
+    Write-Host "     12.0.20 以降への更新で直ったという報告もあります。" -ForegroundColor Yellow
+}
 
 Write-Head "環境"
 Write-Host ("  OS    : {0}" -f (Get-CimInstance Win32_OperatingSystem).Caption)
