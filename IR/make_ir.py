@@ -12,6 +12,12 @@
 """
 import numpy as np, wave, os, sys
 
+# 日本語を出すので標準出力をUTF-8に固定する。
+# これが無いと、コンソールのコードページ次第で UnicodeEncodeError で落ちる
+# (GitHub の Windows ランナーは cp1252)。
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+
 SR = 48000
 OUT = sys.argv[1] if len(sys.argv) > 1 else 'IR'
 os.makedirs(OUT, exist_ok=True)
