@@ -2,3 +2,4 @@
 *.png
 *.wav
 __pycache__/
+installer/*.exe
