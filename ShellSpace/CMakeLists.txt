@@ -7,7 +7,7 @@ if(APPLE)
     set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "")
 endif()
 
-project(ShellSpace VERSION 0.4.0)
+project(ShellSpace VERSION 0.4.1)
 
 if(MSVC)
     # MSVCは既定でソースをシステムコードページ(日本語環境ならCP932)として読む。
