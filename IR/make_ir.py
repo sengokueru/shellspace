@@ -58,17 +58,35 @@ def band_masks(n, edges):
     return [m / s for m in masks]
 
 
-def lowpass(x, fc, order=2):
-    n = len(x)
+def _fft_filter(x, gain_fn):
+    """周波数領域でフィルタを掛ける。ゼロ詰めして線形畳み込みにする。
+
+    ゼロ詰めせずに rfft/irfft すると巡回畳み込みになり、冒頭の強い立ち上がりに
+    対するフィルタ応答が**バッファの末尾へ回り込む**。実際これで胴鳴りIRの
+    末尾に -54dB の偽の尻尾が出ていた（畳み込むと入力の約1秒後にゴーストが付く）。
+    """
+    n0 = len(x)
+    n = 1
+    while n < n0 * 2:
+        n *= 2
+
+    padded = np.zeros(n)
+    padded[:n0] = x
+
     f = np.fft.rfftfreq(n, 1 / SR)
-    return np.fft.irfft(np.fft.rfft(x) * (1.0 / (1.0 + (f / fc) ** (2 * order))), n)
+    y = np.fft.irfft(np.fft.rfft(padded) * gain_fn(f), n)
+    return y[:n0]
+
+
+def lowpass(x, fc, order=2):
+    return _fft_filter(x, lambda f: 1.0 / (1.0 + (f / fc) ** (2 * order)))
 
 
 def highpass(x, fc, order=1):
-    n = len(x)
-    f = np.fft.rfftfreq(n, 1 / SR)
-    r = (f / fc) ** (2 * order)
-    return np.fft.irfft(np.fft.rfft(x) * (r / (1 + r)), n)
+    def gain(f):
+        r = (f / fc) ** (2 * order)
+        return r / (1 + r)
+    return _fft_filter(x, gain)
 
 
 # ================================================================== HALL
