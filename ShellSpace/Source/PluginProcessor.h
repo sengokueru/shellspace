@@ -93,9 +93,21 @@ private:
 
     juce::AudioFormatManager formatManager;
 
+    /** 分割方式は JUCE 既定（均一分割・ゼロレイテンシ）のまま。
+        非均一分割(NonUniform{256})も試したが、実測で判断を分けた:
+          ブロック長 64  BODY+SPACE  0.893 -> 0.238  (改善)
+          ブロック長 512 BODY+SPACE  0.087 -> 0.194  (悪化)
+        512 は最もよく使われる設定で、そこで2倍以上重くなるため採用しない。
+        ブロック長に応じて head サイズを変える手はあるが、Convolution は
+        構築時にしか決められず作り直しが要る。効果と複雑さが釣り合わない。 */
     juce::dsp::Convolution bodyConv;
-    juce::dsp::Convolution spaceConv;                  // 通常ステレオ
-    juce::dsp::Convolution spaceConvL, spaceConvR;     // True Stereo (左音源/右音源)
+    juce::dsp::Convolution spaceConv;
+    juce::dsp::Convolution spaceConvL;
+    juce::dsp::Convolution spaceConvR;
+
+    /** 無音のセクションは畳み込まない。既定はBODY/SPACEとも-60dB(切)なので、
+        挿しただけの状態で2系統が無駄に回っていた。 */
+    bool bodyWasActive { false }, spaceWasActive { false };
 
     juce::dsp::DelayLine<float, juce::dsp::DelayLineInterpolationTypes::Linear> predelay { 96000 };
     juce::dsp::ProcessorDuplicator<juce::dsp::IIR::Filter<float>,

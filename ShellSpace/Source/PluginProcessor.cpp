@@ -576,11 +576,25 @@ void ShellSpaceProcessor::processChunk (juce::AudioBuffer<float>& buffer, int nu
         conv.process (ctx);
     };
 
-    // ---- BODY: 胴鳴り ------------------------------------------------------
-    for (int ch = 0; ch < numCh; ++ch)
-        bodyBuf.copyFrom (ch, 0, buffer, ch, offset, n);
+    // 無音のセクションは畳み込まない。既定はBODY/SPACEとも-60dB(切)なので、
+    // ここを飛ばせば挿しただけの状態のコストがほぼ消える。
+    // 音量がゼロへ落ち切るまでは処理を続ける（尾を途中で切らないため）。
+    const bool bodyActive  = gBody .getCurrentValue() > 0.0f || gBody .getTargetValue() > 0.0f;
+    const bool spaceActive = gSpace.getCurrentValue() > 0.0f || gSpace.getTargetValue() > 0.0f;
 
-    processConv (bodyConv, bodyBuf);
+    // ---- BODY: 胴鳴り ------------------------------------------------------
+    if (bodyActive)
+    {
+        for (int ch = 0; ch < numCh; ++ch)
+            bodyBuf.copyFrom (ch, 0, buffer, ch, offset, n);
+
+        processConv (bodyConv, bodyBuf);
+    }
+    else
+    {
+        bodyBuf.clear (0, n);
+    }
+    bodyWasActive = bodyActive;
 
     // ---- SPACE: プリディレイ -> ホール --------------------------------------
     // 遅延量は1サンプルずつ滑らかに動かす。いきなり読み取り位置を飛ばすと
@@ -588,7 +602,18 @@ void ShellSpaceProcessor::processChunk (juce::AudioBuffer<float>& buffer, int nu
     const float preMs = apvts.getRawParameterValue ("spacePre")->load();
     predelaySamples.setTargetValue ((float) (preMs * 0.001 * currentSampleRate));
 
+    if (! spaceActive)
     {
+        // 無音なら畳み込みもディレイラインも回さない。
+        // 目標値だけは追わせておく（再開時にスイープしないように）。
+        predelaySamples.skip (n);
+        spaceBuf.clear (0, n);
+        spaceWasActive = false;
+    }
+    else
+    {
+        spaceWasActive = true;
+
         // チャンネルごとに同じ軌跡をたどらせる（左右で遅延がズレないように）
         const auto startValue = predelaySamples.getCurrentValue();
 
@@ -607,32 +632,32 @@ void ShellSpaceProcessor::processChunk (juce::AudioBuffer<float>& buffer, int nu
                 outp[i] = predelay.popSample (ch);
             }
         }
-    }
 
-    // trueStereoActive はモノラルのバスでは立たない（reloadSpaceIRで落としている）。
-    // 念のためここでも確認し、条件が崩れたらIR未ロードの畳み込みを通さないようにする。
-    if (trueStereoActive.load() && numCh >= 2 && spaceBufL.getNumChannels() >= 2)
-    {
-        // True Stereo: 左入力を LL/LR に、右入力を RL/RR に通して足す。
-        // 各系統は入力を両chに複製して渡す（IRの2chがそれぞれの行き先）。
-        for (int ch = 0; ch < 2; ++ch)
+        // trueStereoActive はモノラルのバスでは立たない（reloadSpaceIRで落としている）。
+        // 念のためここでも確認し、条件が崩れたらIR未ロードの畳み込みを通さないようにする。
+        if (trueStereoActive.load() && numCh >= 2 && spaceBufL.getNumChannels() >= 2)
         {
-            spaceBufL.copyFrom (ch, 0, spaceBuf, 0, 0, n);   // 左入力
-            spaceBufR.copyFrom (ch, 0, spaceBuf, 1, 0, n);   // 右入力
+            // True Stereo: 左入力を LL/LR に、右入力を RL/RR に通して足す。
+            // 各系統は入力を両chに複製して渡す（IRの2chがそれぞれの行き先）。
+            for (int ch = 0; ch < 2; ++ch)
+            {
+                spaceBufL.copyFrom (ch, 0, spaceBuf, 0, 0, n);   // 左入力
+                spaceBufR.copyFrom (ch, 0, spaceBuf, 1, 0, n);   // 右入力
+            }
+
+            processConv (spaceConvL, spaceBufL);
+            processConv (spaceConvR, spaceBufR);
+
+            for (int ch = 0; ch < 2; ++ch)
+            {
+                spaceBuf.copyFrom (ch, 0, spaceBufL, ch, 0, n);
+                spaceBuf.addFrom  (ch, 0, spaceBufR, ch, 0, n);
+            }
         }
-
-        processConv (spaceConvL, spaceBufL);
-        processConv (spaceConvR, spaceBufR);
-
-        for (int ch = 0; ch < 2; ++ch)
+        else
         {
-            spaceBuf.copyFrom (ch, 0, spaceBufL, ch, 0, n);
-            spaceBuf.addFrom  (ch, 0, spaceBufR, ch, 0, n);
+            processConv (spaceConv, spaceBuf);
         }
-    }
-    else
-    {
-        processConv (spaceConv, spaceBuf);
     }
 
     // ---- WET をまとめて HPF -------------------------------------------------

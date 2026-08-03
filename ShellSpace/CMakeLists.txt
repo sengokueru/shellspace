@@ -145,6 +145,29 @@ target_link_libraries(ShellSpaceDspTest PRIVATE
     juce::juce_recommended_warning_flags)
 
 #==============================================================================
+# CPU負荷の実測。体感や推測でなくリアルタイム比で出す。
+juce_add_console_app(ShellSpaceCpuBench PRODUCT_NAME "ShellSpaceCpuBench")
+
+target_sources(ShellSpaceCpuBench PRIVATE
+    Tests/cpu_bench.cpp
+    Source/PluginProcessor.cpp
+    Source/PluginEditor.cpp)
+
+target_compile_definitions(ShellSpaceCpuBench PRIVATE
+    JUCE_WEB_BROWSER=0
+    JUCE_USE_CURL=0
+    JUCE_DISPLAY_SPLASH_SCREEN=0)
+
+target_link_libraries(ShellSpaceCpuBench PRIVATE
+    ShellSpaceIRs
+    juce::juce_audio_utils
+    juce::juce_dsp
+    PUBLIC
+    juce::juce_recommended_config_flags
+    juce::juce_recommended_lto_flags
+    juce::juce_recommended_warning_flags)
+
+#==============================================================================
 # 検証ホスト: ビルドしたVST3を実際にロードして音を通し、出力を測る。
 juce_add_console_app(ShellSpaceTest PRODUCT_NAME "ShellSpaceTest")
 
