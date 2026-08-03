@@ -3,8 +3,8 @@
 ドラムの**胴鳴り**、楽器キャビネット、ホールの**残響**を扱うコンボリューション・プラグイン。
 
 - 形式: **VST3 / Windows x64・macOS universal、Audio Unit / macOS universal**
-- 最新機能版: **v0.4.0**
-- フレームワーク: [JUCE](https://juce.com/) 8
+- 最新機能版: **v0.4.1**
+- フレームワーク: [JUCE](https://juce.com/) 9
 - Visual C++ 再頒布可能パッケージは**不要**（CRT を静的リンク済み）
 
 **[→ ダウンロード（Releases）](../../releases/latest)**
@@ -37,8 +37,11 @@ Level 系は既定が **-60dB（＝切）**。挿しただけでは音が変わ�
 
 ### 配布パッケージ
 
-- Windows: `ShellSpace-0.4.0-Setup.exe`、または`ShellSpace-0.4.0-Windows-x64.zip`
-- macOS: VST3とAUを選べる`ShellSpace-0.4.0-macOS.pkg`、またはフォーマット別ZIP
+- Windows: `ShellSpace-0.4.1-Setup.exe`、または`ShellSpace-0.4.1-Windows-x64.zip`
+- macOS: VST3とAUを選べる`ShellSpace-0.4.1-macOS.pkg`、またはフォーマット別ZIP
+
+> **v0.4.0 は使わないこと。** クラッシュ・モノラルでの素通し・IR 末尾のゴーストがある。
+> バイナリは取り下げ済み。
 
 未署名ビルドのため、OSのセキュリティ確認が表示される場合がある。
 

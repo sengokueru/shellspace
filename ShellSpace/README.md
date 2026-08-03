@@ -4,7 +4,7 @@
 [../IR](../IR) で作ったIRをプラグインに埋め込むので、単体で完結する。
 
 - 形式: **VST3 / Windows x64・macOS universal、Audio Unit / macOS universal**
-- 配布版: **v0.4.0**
+- 配布版: **v0.4.1**
 - フレームワーク: JUCE（`juce::dsp::Convolution` = 分割FFT畳み込み）
 
 ## 信号の流れ
@@ -43,9 +43,9 @@ Level系は既定が **-60dB（＝無音）**。挿しただけでは音が変�
 
 ## インストールとフィードバック
 
-- Windows: `ShellSpace-0.4.0-Setup.exe`、またはポータブルZIP内の
+- Windows: `ShellSpace-0.4.1-Setup.exe`、またはポータブルZIP内の
   `ShellSpace.vst3` をVST3フォルダへ配置。
-- macOS: `ShellSpace-0.4.0-macOS.pkg`、またはVST3/AU別のZIPを展開して
+- macOS: `ShellSpace-0.4.1-macOS.pkg`、またはVST3/AU別のZIPを展開して
   `/Library/Audio/Plug-Ins/VST3` / `/Library/Audio/Plug-Ins/Components` へ配置。
 - 未署名ビルドのため、OSのセキュリティ確認が表示される場合がある。
 
