@@ -484,8 +484,15 @@ void ShellSpaceProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 
     predelay.reset();
     wetHighpass.reset();
-    lastPredelayMs = -1.0f;
     lastHpHz = -1.0f;
+
+    // 現在値から始めて、以後は滑らかに追わせる（起動時にスイープしないように）
+    const float preMs = apvts.getRawParameterValue ("spacePre")->load();
+    predelaySamples.reset (sampleRate, 0.05);
+    predelaySamples.setCurrentAndTargetValue ((float) (preMs * 0.001 * sampleRate));
+
+    hpfHz.reset (sampleRate, 0.05);
+    hpfHz.setCurrentAndTargetValue (apvts.getRawParameterValue ("hpf")->load());
 
     const int ch = (int) spec.numChannels;
     for (auto* b : { &bodyBuf, &spaceBuf, &spaceBufL, &spaceBufR, &wetBuf })
@@ -576,22 +583,29 @@ void ShellSpaceProcessor::processChunk (juce::AudioBuffer<float>& buffer, int nu
     processConv (bodyConv, bodyBuf);
 
     // ---- SPACE: プリディレイ -> ホール --------------------------------------
+    // 遅延量は1サンプルずつ滑らかに動かす。いきなり読み取り位置を飛ばすと
+    // プチッと鳴るため。テープディレイのように滑らかに移る。
     const float preMs = apvts.getRawParameterValue ("spacePre")->load();
-    if (! juce::approximatelyEqual (preMs, lastPredelayMs))
-    {
-        predelay.setDelay ((float) (preMs * 0.001 * currentSampleRate));
-        lastPredelayMs = preMs;
-    }
+    predelaySamples.setTargetValue ((float) (preMs * 0.001 * currentSampleRate));
 
-    for (int ch = 0; ch < numCh; ++ch)
     {
-        const auto* in = buffer.getReadPointer (ch) + offset;
-        auto* outp = spaceBuf.getWritePointer (ch);
+        // チャンネルごとに同じ軌跡をたどらせる（左右で遅延がズレないように）
+        const auto startValue = predelaySamples.getCurrentValue();
 
-        for (int i = 0; i < n; ++i)
+        for (int ch = 0; ch < numCh; ++ch)
         {
-            predelay.pushSample (ch, in[i]);
-            outp[i] = predelay.popSample (ch);
+            predelaySamples.setCurrentAndTargetValue (startValue);
+            predelaySamples.setTargetValue ((float) (preMs * 0.001 * currentSampleRate));
+
+            const auto* in = buffer.getReadPointer (ch) + offset;
+            auto* outp = spaceBuf.getWritePointer (ch);
+
+            for (int i = 0; i < n; ++i)
+            {
+                predelay.setDelay (predelaySamples.getNextValue());
+                predelay.pushSample (ch, in[i]);
+                outp[i] = predelay.popSample (ch);
+            }
         }
     }
 
@@ -633,10 +647,15 @@ void ShellSpaceProcessor::processChunk (juce::AudioBuffer<float>& buffer, int nu
     gBody .skip (n);
     gSpace.skip (n);
 
-    const float hp = apvts.getRawParameterValue ("hpf")->load();
+    // カットオフを滑らかに追わせ、ブロックごとに係数を作り直す。
+    // 目標値へ一気に飛ばすと係数が跳ねて段付きノイズになる。
+    hpfHz.setTargetValue (apvts.getRawParameterValue ("hpf")->load());
+    const float hp = hpfHz.skip (n);
+
     if (! juce::approximatelyEqual (hp, lastHpHz))
     {
-        *wetHighpass.state = *juce::dsp::IIR::Coefficients<float>::makeHighPass (currentSampleRate, hp);
+        *wetHighpass.state = *juce::dsp::IIR::Coefficients<float>::makeHighPass (
+                                 currentSampleRate, juce::jlimit (20.0f, 400.0f, hp));
         lastHpHz = hp;
     }
     {

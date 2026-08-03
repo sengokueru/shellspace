@@ -105,11 +105,17 @@ private:
 
     juce::SmoothedValue<float> gDry, gBody, gSpace, gOut;
 
+    /** Predelay と Wet HPF は値が飛ぶと音に出る。
+        Predelay: 読み取り位置が瞬間移動してプチッと鳴る
+        HPF     : 係数が跳ねて段付きノイズになる
+        どちらも目標値を滑らかに追わせて回避する。 */
+    juce::SmoothedValue<float> predelaySamples, hpfHz;
+
     std::atomic<bool> bodyDirty { true }, spaceDirty { true };
     std::atomic<bool> trueStereoActive { false };
 
     double currentSampleRate { 48000.0 };
-    float lastPredelayMs { -1.0f }, lastHpHz { -1.0f };
+    float lastHpHz { -1.0f };
     int currentProgram { 0 };
 
     /** ユーザーIRのパスと直近のエラー。
