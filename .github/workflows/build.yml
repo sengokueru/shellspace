@@ -8,7 +8,6 @@ on:
   workflow_dispatch:
 
 env:
-  VERSION: 0.4.0
   PLUGINVAL_VERSION: v1.0.4
 
 jobs:
@@ -39,6 +38,12 @@ jobs:
           python -m pip install --upgrade pip numpy
           python IR/make_ir.py IR
           python IR/verify_ir.py IR
+
+      - name: Test release checks
+        run: python -m unittest discover -s tests -v
+
+      - name: Read package version from CMake
+        run: python scripts/release_version.py
 
       - name: Cache JUCE
         uses: actions/cache@v4

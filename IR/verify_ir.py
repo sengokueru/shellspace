@@ -14,7 +14,8 @@ D = sys.argv[1] if len(sys.argv) > 1 else 'IR'
 
 def read24(p):
     with wave.open(p, 'rb') as w:
-        assert w.getsampwidth() == 3, w.getsampwidth()
+        if w.getsampwidth() != 3:
+            raise ValueError(f'Expected 24-bit PCM, got {w.getsampwidth() * 8}-bit')
         ch, fr, n = w.getnchannels(), w.getframerate(), w.getnframes()
         raw = np.frombuffer(w.readframes(n), dtype=np.uint8).reshape(-1, 3)
     b = np.zeros((raw.shape[0], 4), dtype=np.uint8)
@@ -40,10 +41,45 @@ BANDS = [(63, 125, '63-125', 2.9), (125, 250, '125-250', 2.9), (250, 500, '250-5
          (500, 1000, '500-1k', 2.6), (1000, 2000, '1k-2k', 2.2), (2000, 4000, '2k-4k', 1.6),
          (4000, 8000, '4k-8k', 1.8), (8000, 16000, '8k-16k', 1.2)]
 
+failures = []
+
+
+def require(condition, message):
+    if not condition:
+        failures.append(message)
+        print('  FAIL:', message)
+
+
+expected = {f'Shell_{kind}_{material}_{character}.wav'
+            for kind in ('Kick', 'Snare', 'Tom')
+            for material in ('Maple', 'Birch', 'Mahogany', 'Oak')
+            for character in ('Studio', 'Projection', 'Tight', 'Open')}
+expected.update({'Cab_Guitar_4x12.wav', 'Cab_Bass_8x10.wav'})
+expected.update(f'Hall_Yokosuka-type_{kind}_{layout}.wav'
+                for kind in ('Full', 'Drum') for layout in ('Stereo', 'TrueStereo'))
+present = {os.path.basename(p) for p in glob.glob(os.path.join(D, '*.wav'))}
+require(expected <= present, 'Missing IR files: ' + ', '.join(sorted(expected - present)))
+require(present <= expected, 'Unexpected IR files: ' + ', '.join(sorted(present - expected)))
+
 for p in sorted(glob.glob(os.path.join(D, '*.wav'))):
-    x, fr, ch = read24(p)
+    name = os.path.basename(p)
+    try:
+        x, fr, ch = read24(p)
+    except (AssertionError, ValueError, EOFError, wave.Error, OSError) as exc:
+        require(False, f'{name}: invalid 24-bit WAV ({exc})')
+        continue
+    require(fr == SR, f'{name}: expected {SR}Hz, got {fr}')
+    require(ch == (4 if 'TrueStereo' in name else 2), f'{name}: wrong channel count {ch}')
+    require(len(x) > 0, f'{name}: empty IR')
+    if fr != SR or ch != (4 if 'TrueStereo' in name else 2) or len(x) == 0:
+        continue
     mono = x.mean(axis=1)
     pk = np.max(np.abs(x))
+    require(0 < pk < 0.9999, f'{name}: silent or clipped IR (peak={pk})')
+    if pk == 0:
+        continue
+    if 'Hall' not in name:
+        require(np.array_equal(x[:, 0], x[:, 1]), f'{name}: L/R mismatch')
     print('=' * 66)
     print(os.path.basename(p))
     print(f'  {fr}Hz {ch}ch 24bit  len={len(x)/fr:.3f}s  peak={20*np.log10(pk):+.2f}dBFS '
@@ -62,6 +98,8 @@ for p in sorted(glob.glob(os.path.join(D, '*.wav'))):
                   '  '.join(f'{n}={v:+.1f}' for n, v in zip(names, e)))
             print(f'   同側優位 LL>LR:{e[0]>e[1]}  RR>RL:{e[3]>e[2]}'
                   f'   左右対称(±1.5dB):{abs(e[0]-e[3])<1.5 and abs(e[1]-e[2])<1.5}')
+            require(e[0] > e[1] and e[3] > e[2], f'{name}: True Stereo channel ordering')
+            require(abs(e[0]-e[3]) < 1.5 and abs(e[1]-e[2]) < 1.5, f'{name}: asymmetric ER energy')
     elif 'Cab_' in p:
         F = np.abs(np.fft.rfft(mono)) + 1e-30
         f = np.fft.rfftfreq(len(mono), 1 / SR)
@@ -72,9 +110,11 @@ for p in sorted(glob.glob(os.path.join(D, '*.wav'))):
                                       for hz, db in zip(points, vals)))
         print(f'   L/R一致(mono安全): {np.allclose(x[:,0], x[:,1])}')
         if 'Guitar' in p:
+            require(vals[2] > -15 and vals[7] > -20 and vals[8] < -20, f'{name}: guitar bandwidth')
             print(f'   4x12帯域(80Hz-5kHz): '
                   f'{vals[2] > -15 and vals[7] > -20}  8kHz減衰: {vals[8] < -20}')
         else:
+            require(abs((vals[0]-vals[4]) + 10) < 4 and vals[7] > -10, f'{name}: bass bandwidth')
             print(f'   8x10低域(40Hz≈-10dB): {abs((vals[0]-vals[4]) + 10) < 4}  '
                   f'5kHzまで有効: {vals[7] > -10}')
     else:
@@ -90,3 +130,6 @@ for p in sorted(glob.glob(os.path.join(D, '*.wav'))):
         print(f'   T20-RT60: {rt60(mono):.3f}s   L/R一致(mono安全): {np.allclose(x[:,0], x[:,1])}')
         sub = np.sum(band(mono, 15, 30) ** 2) / (np.sum(mono ** 2) + 1e-30)
         print(f'   20Hz付近の残留エネルギー比: {sub*100:.4f}%')
+
+print(f'\nIR verification: {len(present)} files, {len(failures)} failures')
+sys.exit(1 if failures else 0)
