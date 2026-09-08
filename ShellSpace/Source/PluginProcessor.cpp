@@ -56,6 +56,8 @@ namespace
             const int s = firstChannel + ch;
             if (s < src.getNumChannels())
                 out.copyFrom (ch, 0, src, s, 0, src.getNumSamples());
+            else if (src.getNumChannels() == 1)
+                out.copyFrom (ch, 0, src, 0, 0, src.getNumSamples());
             else
                 out.clear (ch, 0, src.getNumSamples());
         }
@@ -197,10 +199,9 @@ void ShellSpaceProcessor::parameterChanged (const juce::String& id, float)
 
 void ShellSpaceProcessor::handleAsyncUpdate()
 {
-    // すぐには読み込まず、タイマーを張り直してバーストをまとめる。
-    // オートメーションで Tune を掃引すると毎フレーム値が変わるため、
-    // ここで直接 loadImpulseResponse を呼ぶと呼び出し頻度が過大になる。
-    startTimer (kIRReloadDelayMs);
+    // Throttle rather than debounce: continuous automation must not postpone
+    // every pending update forever.
+    if (! isTimerRunning()) startTimer (kIRReloadDelayMs);
 }
 
 void ShellSpaceProcessor::timerCallback()
@@ -299,45 +300,61 @@ juce::AudioBuffer<float> ShellSpaceProcessor::readIR (const juce::File& userFile
                                                       juce::String& errorOut)
 {
     errorOut = {};
-    std::unique_ptr<juce::AudioFormatReader> reader;
-
-    if (userFile.existsAsFile())
+    sampleRateOut = 48000.0;
+    auto decode = [&sampleRateOut, &errorOut] (juce::AudioFormatReader* reader) -> juce::AudioBuffer<float>
     {
-        reader.reset (formatManager.createReaderFor (userFile));
         if (reader == nullptr)
-            errorOut = u8 ("読めない形式: ") + userFile.getFileName();
-    }
+        {
+            errorOut = u8 ("読めないIR形式（内蔵IRを使用）");
+            return {};
+        }
+        const auto rate = reader->sampleRate;
+        const auto length = reader->lengthInSamples;
+        const auto channels = reader->numChannels;
+        if (! std::isfinite (rate) || rate < 8000.0 || rate > 384000.0
+            || length <= 0 || length > rate * 30.0
+            || (channels != 1 && channels != 2 && channels != 4))
+        {
+            errorOut = u8 ("IRは30秒以内・1/2/4ch・8〜384kHzが必要です（内蔵IRを使用）");
+            return {};
+        }
+        juce::AudioBuffer<float> buf ((int) channels, (int) length);
+        buf.clear();
+        if (! reader->read (&buf, 0, (int) length, 0, true, true))
+        {
+            errorOut = u8 ("IRの読み取り失敗（内蔵IRを使用）");
+            return {};
+        }
+        for (int ch = 0; ch < buf.getNumChannels(); ++ch)
+            for (int i = 0; i < buf.getNumSamples(); ++i)
+                if (! std::isfinite (buf.getSample (ch, i)))
+                {
+                    errorOut = u8 ("IRにNaN/Infが含まれています（内蔵IRを使用）");
+                    return {};
+                }
+        sampleRateOut = rate;
+        return buf;
+    };
 
-    if (reader == nullptr)
+    if (userFile != juce::File())
     {
-        int size = 0;
-        if (auto* data = findResource (builtInName, size))
-            reader.reset (formatManager.createReaderFor (
-                std::make_unique<juce::MemoryInputStream> (data, (size_t) size, false)));
+        if (userFile.existsAsFile())
+        {
+            std::unique_ptr<juce::AudioFormatReader> reader (formatManager.createReaderFor (userFile));
+            auto result = decode (reader.get());
+            if (result.getNumSamples() > 0) return result;
+        }
+        else errorOut = u8 ("IRが見つかりません（内蔵IRを使用）: ") + userFile.getFileName();
     }
-
-    if (reader == nullptr)
+    int size = 0;
+    if (auto* data = findResource (builtInName, size))
     {
-        if (errorOut.isEmpty())
-            errorOut = u8 ("IRが読めません");
-        sampleRateOut = 48000.0;
-        return {};
+        std::unique_ptr<juce::AudioFormatReader> reader (formatManager.createReaderFor (
+            std::make_unique<juce::MemoryInputStream> (data, (size_t) size, false)));
+        return decode (reader.get()); // Keep any user-file error visible.
     }
-
-    const int len   = (int) reader->lengthInSamples;
-    const int numCh = (int) reader->numChannels;
-
-    if (len <= 0 || numCh <= 0)
-    {
-        errorOut = u8 ("空のIRです");
-        sampleRateOut = 48000.0;
-        return {};
-    }
-
-    juce::AudioBuffer<float> buf (numCh, len);
-    reader->read (&buf, 0, len, 0, true, true);
-    sampleRateOut = reader->sampleRate > 0.0 ? reader->sampleRate : 48000.0;
-    return buf;
+    errorOut = u8 ("内蔵IRが見つかりません");
+    return {};
 }
 
 //==============================================================================
@@ -365,11 +382,12 @@ void ShellSpaceProcessor::reloadBodyIR()
     if (src.getNumSamples() <= 0)
         return;
 
-    // Tune: IRを時間軸ごと伸縮させる = 実機のチューニングと同じ挙動になる
+    // Time scaling links pitch and decay; this is not physical drum tuning.
     const double ratio = std::pow (2.0, (double) semitones / 12.0);
     const int srcLen = src.getNumSamples();
     const int numCh  = juce::jmin (2, src.getNumChannels());
     const int dstLen = juce::jmax (16, (int) std::floor ((double) srcLen / ratio));
+    bodyTailSeconds = dstLen / irRate;
 
     juce::AudioBuffer<float> dst (juce::jmax (1, numCh), dstLen);
 
@@ -388,10 +406,14 @@ void ShellSpaceProcessor::reloadBodyIR()
         }
     }
 
-    bodyConv.loadImpulseResponse (std::move (dst), irRate,
-                                  juce::dsp::Convolution::Stereo::yes,
-                                  juce::dsp::Convolution::Trim::no,
-                                  juce::dsp::Convolution::Normalise::yes);
+    PendingIR next;
+    next.first = std::move (dst);
+    next.rate = irRate;
+    next.ready = true;
+    {
+        const juce::SpinLock::ScopedLockType mailboxLock (pendingIRLock);
+        std::swap (pendingBody, next);
+    } // Any superseded buffer is freed here, never on the audio thread.
 }
 
 void ShellSpaceProcessor::reloadSpaceIR()
@@ -404,7 +426,7 @@ void ShellSpaceProcessor::reloadSpaceIR()
     // ここで落としておかないと、processChunk が通常ステレオ側へ分岐するのに
     // spaceConv へIRを読んでいない状態になり、JUCEのConvolutionが入力を
     // 素通しして「残響のかわりに原音が返る」。
-    const bool stereoBus = getTotalNumOutputChannels() >= 2;
+    const bool stereoBus = outputChannels.load() >= 2;
     const bool wantTrueStereo = apvts.getRawParameterValue ("trueStereo")->load() > 0.5f
                                   && stereoBus;
 
@@ -420,11 +442,11 @@ void ShellSpaceProcessor::reloadSpaceIR()
     {
         const juce::ScopedLock sl (stateLock);
         spaceIRError = err;
-        trueStereoActive = false;
         return;
     }
 
     const bool have4ch = src.getNumChannels() >= 4;
+    spaceTailSeconds = src.getNumSamples() / irRate;
     const bool useTrueStereo = wantTrueStereo && have4ch;
 
     if (wantTrueStereo && ! have4ch)
@@ -436,50 +458,82 @@ void ShellSpaceProcessor::reloadSpaceIR()
         spaceIRError = err;
     }
 
+    PendingIR next;
+    next.first = extractPair (src, 0);
+    next.rate = irRate;
+    next.ready = true;
+    next.trueStereo = useTrueStereo;
     if (useTrueStereo)
     {
-        // 4ch = LL, LR, RL, RR。左音源ぶんと右音源ぶんに分けて2系統で畳み込む。
-        spaceConvL.loadImpulseResponse (extractPair (src, 0), irRate,
-                                        juce::dsp::Convolution::Stereo::yes,
-                                        juce::dsp::Convolution::Trim::no,
-                                        juce::dsp::Convolution::Normalise::yes);
-        spaceConvR.loadImpulseResponse (extractPair (src, 2), irRate,
-                                        juce::dsp::Convolution::Stereo::yes,
-                                        juce::dsp::Convolution::Trim::no,
-                                        juce::dsp::Convolution::Normalise::yes);
+        next.second = extractPair (src, 2);
     }
-    else
     {
-        spaceConv.loadImpulseResponse (extractPair (src, 0), irRate,
-                                       juce::dsp::Convolution::Stereo::yes,
-                                       juce::dsp::Convolution::Trim::no,
-                                       juce::dsp::Convolution::Normalise::yes);
+        const juce::SpinLock::ScopedLockType mailboxLock (pendingIRLock);
+        std::swap (pendingSpace, next);
     }
+}
 
-    trueStereoActive = useTrueStereo;
+void ShellSpaceProcessor::applyPendingIRs()
+{
+    const juce::SpinLock::ScopedTryLockType mailboxLock (pendingIRLock);
+    if (! mailboxLock.isLocked()) return; // Keep the current IR; never wait.
+    auto load = [] (juce::dsp::Convolution& conv, juce::AudioBuffer<float>& data, double rate)
+    {
+        conv.loadImpulseResponse (std::move (data), rate,
+                                  juce::dsp::Convolution::Stereo::yes,
+                                  juce::dsp::Convolution::Trim::no,
+                                  juce::dsp::Convolution::Normalise::yes);
+    };
+    if (pendingBody.ready)
+    {
+        load (bodyConv, pendingBody.first, pendingBody.rate);
+        pendingBody.ready = false;
+    }
+    if (pendingSpace.ready)
+    {
+        if (pendingSpace.trueStereo)
+        {
+            load (spaceConvL, pendingSpace.first, pendingSpace.rate);
+            load (spaceConvR, pendingSpace.second, pendingSpace.rate);
+        }
+        else load (spaceConv, pendingSpace.first, pendingSpace.rate);
+        trueStereoActive = pendingSpace.trueStereo;
+        pendingSpace.ready = false;
+    }
 }
 
 //==============================================================================
 void ShellSpaceProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
-    // Convolution::prepare() と loadImpulseResponse() を同時に走らせない。
-    // ホストがサンプルレートやブロック長を切り替えている最中に、パラメータ変更で
-    // メッセージスレッドから loadImpulseResponse が入ると、JUCEの内部キューが
-    // 壊れて空の std::function を呼び bad_function_call で abort する。
-    // CriticalSection は再入可能なので、この中で reloadBodyIR/reloadSpaceIR が
-    // 同じロックを取っても問題ない。
+    // Hosts serialize prepare/process. Workers only prepare mailbox buffers.
     const juce::ScopedLock sl (irLoadLock);
 
     currentSampleRate = sampleRate;
+    outputChannels = getTotalNumOutputChannels();
 
     juce::dsp::ProcessSpec spec { sampleRate,
                                   (juce::uint32) samplesPerBlock,
                                   (juce::uint32) juce::jmax (1, getTotalNumOutputChannels()) };
 
+    // Unused routes start silent, never as JUCE's default identity IR.
+    for (auto* c : { &bodyConv, &spaceConv, &spaceConvL, &spaceConvR })
+    {
+        juce::AudioBuffer<float> silence (2, 1);
+        silence.clear();
+        c->loadImpulseResponse (std::move (silence), sampleRate,
+            juce::dsp::Convolution::Stereo::yes, juce::dsp::Convolution::Trim::no,
+            juce::dsp::Convolution::Normalise::no);
+    }
+    reloadBodyIR();
+    reloadSpaceIR();
+    applyPendingIRs();
+    // prepare after load guarantees that offline rendering starts with the IR.
     for (auto* c : { &bodyConv, &spaceConv, &spaceConvL, &spaceConvR })
         c->prepare (spec);
 
     predelay.prepare (spec);
+    *wetHighpass.state = juce::dsp::IIR::ArrayCoefficients<float>::makeHighPass (
+        sampleRate, apvts.getRawParameterValue ("hpf")->load());
     wetHighpass.prepare (spec);
 
     predelay.reset();
@@ -498,17 +552,15 @@ void ShellSpaceProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     for (auto* b : { &bodyBuf, &spaceBuf, &spaceBufL, &spaceBufR, &wetBuf })
         b->setSize (ch, samplesPerBlock, false, false, true);
 
-    for (auto* s : { &gDry, &gBody, &gSpace, &gOut })
+    for (auto* s : { &gDry, &gBody, &gSpace, &gOut, &gBypass })
         s->reset (sampleRate, 0.02);
 
-    reloadBodyIR();
-    reloadSpaceIR();
+    reset();
 }
 
 void ShellSpaceProcessor::reset()
 {
-    // reset() も Convolution の内部状態を触るので、IRの差し替えと同時に走らせない。
-    const juce::ScopedLock sl (irLoadLock);
+    // Only the host/audio thread touches convolution state.
 
     // トランスポート移動時などに残響が残らないようにする。
     // これが無いと、切ってあったセクションのレベルを上げた瞬間に
@@ -521,6 +573,23 @@ void ShellSpaceProcessor::reset()
 
     for (auto* b : { &bodyBuf, &spaceBuf, &spaceBufL, &spaceBufR, &wetBuf })
         b->clear();
+
+    auto gain = [this] (const char* level, const char* mute)
+    {
+        return apvts.getRawParameterValue (mute)->load() > 0.5f ? 0.0f
+             : dbToGain (apvts.getRawParameterValue (level)->load());
+    };
+    gDry.setCurrentAndTargetValue (gain ("dry", "dryMute"));
+    gBody.setCurrentAndTargetValue (gain ("bodyLevel", "bodyMute"));
+    gSpace.setCurrentAndTargetValue (gain ("spaceLevel", "spaceMute"));
+    gOut.setCurrentAndTargetValue (juce::Decibels::decibelsToGain (apvts.getRawParameterValue ("out")->load()));
+    gBypass.setCurrentAndTargetValue (apvts.getRawParameterValue ("bypass")->load() > 0.5f ? 1.0f : 0.0f);
+    bypassWasActive = false;
+    predelaySamples.setCurrentAndTargetValue (
+        apvts.getRawParameterValue ("spacePre")->load() * 0.001f * (float) currentSampleRate);
+    hpfHz.setCurrentAndTargetValue (apvts.getRawParameterValue ("hpf")->load());
+    lastHpHz = -1.0f;
+    bodyWasActive = spaceWasActive = false;
 }
 
 bool ShellSpaceProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
@@ -535,6 +604,16 @@ bool ShellSpaceProcessor::isBusesLayoutSupported (const BusesLayout& layouts) co
 
 void ShellSpaceProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
 {
+    processAudio (buffer, false);
+}
+
+void ShellSpaceProcessor::processBlockBypassed (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
+{
+    processAudio (buffer, true);
+}
+
+void ShellSpaceProcessor::processAudio (juce::AudioBuffer<float>& buffer, bool hostBypass)
+{
     juce::ScopedNoDenormals noDenormals;
 
     const int numCh = juce::jmin (buffer.getNumChannels(), bodyBuf.getNumChannels());
@@ -543,9 +622,20 @@ void ShellSpaceProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     if (numCh <= 0 || total <= 0)
         return;
 
-    // バイパス中は何もせず素通し。畳み込みに遅延が無いのでこれで整合する。
-    if (apvts.getRawParameterValue ("bypass")->load() > 0.5f)
+    applyPendingIRs();
+
+    gBypass.setTargetValue (hostBypass || apvts.getRawParameterValue ("bypass")->load() > 0.5f ? 1.0f : 0.0f);
+    if (gBypass.getCurrentValue() == 1.0f && gBypass.getTargetValue() == 1.0f)
+    {
+        if (! bypassWasActive)
+        {
+            reset(); // Discard the faded-out history before suspending DSP.
+            gBypass.setCurrentAndTargetValue (1.0f);
+        }
+        bypassWasActive = true;
         return;
+    }
+    bypassWasActive = false;
 
     // ミュートはゲイン0にするだけ。SmoothedValue が滑らかに落とすのでプチらない。
     auto muted = [this] (const char* id) { return apvts.getRawParameterValue (id)->load() > 0.5f; };
@@ -593,6 +683,7 @@ void ShellSpaceProcessor::processChunk (juce::AudioBuffer<float>& buffer, int nu
     else
     {
         bodyBuf.clear (0, n);
+        if (bodyWasActive) bodyConv.reset();
     }
     bodyWasActive = bodyActive;
 
@@ -604,6 +695,13 @@ void ShellSpaceProcessor::processChunk (juce::AudioBuffer<float>& buffer, int nu
 
     if (! spaceActive)
     {
+        if (spaceWasActive)
+        {
+            spaceConv.reset();
+            spaceConvL.reset();
+            spaceConvR.reset();
+            predelay.reset();
+        }
         // 無音なら畳み込みもディレイラインも回さない。
         // 目標値だけは追わせておく（再開時にスイープしないように）。
         predelaySamples.skip (n);
@@ -614,22 +712,14 @@ void ShellSpaceProcessor::processChunk (juce::AudioBuffer<float>& buffer, int nu
     {
         spaceWasActive = true;
 
-        // チャンネルごとに同じ軌跡をたどらせる（左右で遅延がズレないように）
-        const auto startValue = predelaySamples.getCurrentValue();
-
-        for (int ch = 0; ch < numCh; ++ch)
+        // Advance once per sample, shared by both channels.
+        for (int i = 0; i < n; ++i)
         {
-            predelaySamples.setCurrentAndTargetValue (startValue);
-            predelaySamples.setTargetValue ((float) (preMs * 0.001 * currentSampleRate));
-
-            const auto* in = buffer.getReadPointer (ch) + offset;
-            auto* outp = spaceBuf.getWritePointer (ch);
-
-            for (int i = 0; i < n; ++i)
+            predelay.setDelay (predelaySamples.getNextValue());
+            for (int ch = 0; ch < numCh; ++ch)
             {
-                predelay.setDelay (predelaySamples.getNextValue());
-                predelay.pushSample (ch, in[i]);
-                outp[i] = predelay.popSample (ch);
+                predelay.pushSample (ch, buffer.getSample (ch, offset + i));
+                spaceBuf.setSample (ch, i, predelay.popSample (ch));
             }
         }
 
@@ -662,15 +752,14 @@ void ShellSpaceProcessor::processChunk (juce::AudioBuffer<float>& buffer, int nu
 
     // ---- WET をまとめて HPF -------------------------------------------------
     wetBuf.clear (0, n);
-    for (int ch = 0; ch < numCh; ++ch)
+    for (int i = 0; i < n; ++i)
     {
-        wetBuf.addFromWithRamp (ch, 0, bodyBuf .getReadPointer (ch), n,
-                                gBody.getCurrentValue(), gBody.getTargetValue());
-        wetBuf.addFromWithRamp (ch, 0, spaceBuf.getReadPointer (ch), n,
-                                gSpace.getCurrentValue(), gSpace.getTargetValue());
+        const auto bodyGain = gBody.getNextValue();
+        const auto spaceGain = gSpace.getNextValue();
+        for (int ch = 0; ch < numCh; ++ch)
+            wetBuf.setSample (ch, i, bodyBuf.getSample (ch, i) * bodyGain
+                                    + spaceBuf.getSample (ch, i) * spaceGain);
     }
-    gBody .skip (n);
-    gSpace.skip (n);
 
     // カットオフを滑らかに追わせ、ブロックごとに係数を作り直す。
     // 目標値へ一気に飛ばすと係数が跳ねて段付きノイズになる。
@@ -679,7 +768,7 @@ void ShellSpaceProcessor::processChunk (juce::AudioBuffer<float>& buffer, int nu
 
     if (! juce::approximatelyEqual (hp, lastHpHz))
     {
-        *wetHighpass.state = *juce::dsp::IIR::Coefficients<float>::makeHighPass (
+        *wetHighpass.state = juce::dsp::IIR::ArrayCoefficients<float>::makeHighPass (
                                  currentSampleRate, juce::jlimit (20.0f, 400.0f, hp));
         lastHpHz = hp;
     }
@@ -691,16 +780,19 @@ void ShellSpaceProcessor::processChunk (juce::AudioBuffer<float>& buffer, int nu
     }
 
     // ---- DRY + WET ---------------------------------------------------------
-    for (int ch = 0; ch < numCh; ++ch)
+    for (int i = 0; i < n; ++i)
     {
-        buffer.applyGainRamp (ch, offset, n, gDry.getCurrentValue(), gDry.getTargetValue());
-        buffer.addFrom (ch, offset, wetBuf, ch, 0, n);
+        const auto dryGain = gDry.getNextValue();
+        const auto outputGain = gOut.getNextValue();
+        const auto bypassMix = gBypass.getNextValue();
+        for (int ch = 0; ch < numCh; ++ch)
+        {
+            const auto input = buffer.getSample (ch, offset + i);
+            const auto processed = (input * dryGain + wetBuf.getSample (ch, i)) * outputGain;
+            buffer.setSample (ch, offset + i,
+                              input * bypassMix + processed * (1.0f - bypassMix));
+        }
     }
-    gDry.skip (n);
-
-    for (int ch = 0; ch < numCh; ++ch)
-        buffer.applyGainRamp (ch, offset, n, gOut.getCurrentValue(), gOut.getTargetValue());
-    gOut.skip (n);
 }
 
 //==============================================================================
@@ -711,7 +803,9 @@ juce::AudioProcessorEditor* ShellSpaceProcessor::createEditor()
 
 void ShellSpaceProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
-    if (auto xml = apvts.copyState().createXml())
+    auto state = apvts.copyState();
+    state.setProperty ("currentProgram", currentProgram.load(), nullptr);
+    if (auto xml = state.createXml())
         copyXmlToBinary (*xml, destData);
 }
 
@@ -719,7 +813,10 @@ void ShellSpaceProcessor::setStateInformation (const void* data, int sizeInBytes
 {
     if (auto xml = getXmlFromBinary (data, sizeInBytes))
     {
+        if (! xml->hasTagName ("STATE")) return;
         apvts.replaceState (juce::ValueTree::fromXml (*xml));
+        currentProgram = juce::jlimit (0, kNumPresets - 1,
+                                     (int) apvts.state.getProperty ("currentProgram", 0));
 
         // replaceState は「ツリー上の値が変化したパラメータ」にしか通知しない。
         // Bool/Choice のような離散パラメータは生の正規化値をスナップせずに保持するため

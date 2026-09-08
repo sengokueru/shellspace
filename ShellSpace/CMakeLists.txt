@@ -132,6 +132,7 @@ target_sources(ShellSpaceDspTest PRIVATE
     Source/PluginEditor.cpp)
 
 target_compile_definitions(ShellSpaceDspTest PRIVATE
+    JUCE_MODAL_LOOPS_PERMITTED=1
     JUCE_WEB_BROWSER=0
     JUCE_USE_CURL=0
     JUCE_DISPLAY_SPLASH_SCREEN=0)

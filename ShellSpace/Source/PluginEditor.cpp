@@ -1,4 +1,6 @@
 #include "PluginEditor.h"
+#include <cstdlib>
+#include <cmath>
 
 namespace
 {
@@ -85,8 +87,15 @@ Fader::Fader (juce::AudioProcessorValueTreeState& s, const juce::String& id,
 
         if (text == u8 ("切") || text.equalsIgnoreCase ("off"))
             target = slider.getMinimum();
-        else if (text.containsAnyOf ("0123456789"))
-            target = text.retainCharacters ("0123456789+-.").getDoubleValue();
+        else
+        {
+            const auto number = text.endsWithIgnoreCase ("dB") ? text.dropLastCharacters (2).trimEnd() : text;
+            const auto utf8 = number.toUTF8();
+            char* end = nullptr;
+            const double parsed = std::strtod (utf8.getAddress(), &end);
+            if (end != utf8.getAddress() && *end == '\0' && std::isfinite (parsed))
+                target = parsed;
+        }
 
         slider.setValue (juce::jlimit (slider.getMinimum(), slider.getMaximum(), target),
                          juce::sendNotificationSync);
@@ -273,30 +282,33 @@ void ShellSpaceEditor::showIRMenu (bool body, juce::Button& source)
     menu.addItem (1, u8 ("wavファイルを読み込む..."));
     menu.addItem (2, u8 ("内蔵IRに戻す"), proc.getUserIR (body) != juce::File());
 
+    const juce::Component::SafePointer<ShellSpaceEditor> safe (this);
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (source),
-                        [this, body] (int result)
+                        [safe, body] (int result)
     {
+        if (safe == nullptr) return;
         if (result == 2)
         {
-            proc.setUserIR (body, juce::File());
-            refreshIRLabels();
+            safe->proc.setUserIR (body, juce::File());
+            safe->refreshIRLabels();
         }
         else if (result == 1)
         {
-            chooser = std::make_unique<juce::FileChooser> (
+            safe->chooser = std::make_unique<juce::FileChooser> (
                 u8 (body ? "胴鳴りIRを選ぶ" : "ホールIRを選ぶ（True Stereoは4ch）"),
                 juce::File::getSpecialLocation (juce::File::userMusicDirectory),
                 "*.wav;*.aiff;*.aif;*.flac");
 
-            chooser->launchAsync (juce::FileBrowserComponent::openMode
+            safe->chooser->launchAsync (juce::FileBrowserComponent::openMode
                                     | juce::FileBrowserComponent::canSelectFiles,
-                                  [this, body] (const juce::FileChooser& fc)
+                                  [safe, body] (const juce::FileChooser& fc)
             {
+                if (safe == nullptr) return;
                 const auto file = fc.getResult();
                 if (file.existsAsFile())
-                    proc.setUserIR (body, file);
+                    safe->proc.setUserIR (body, file);
 
-                refreshIRLabels();
+                safe->refreshIRLabels();
             });
         }
     });
@@ -323,6 +335,7 @@ void ShellSpaceEditor::refreshIRLabels()
 
 void ShellSpaceEditor::timerCallback()
 {
+    refreshIRLabels(); // State may restore a different path without changing program.
     const int program = proc.getCurrentProgram();
     if (program != lastProgram)
     {

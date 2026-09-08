@@ -24,6 +24,7 @@ public:
     void reset() override;
     bool isBusesLayoutSupported (const BusesLayout& layouts) const override;
     void processBlock (juce::AudioBuffer<float>&, juce::MidiBuffer&) override;
+    void processBlockBypassed (juce::AudioBuffer<float>&, juce::MidiBuffer&) override;
 
     juce::AudioProcessorEditor* createEditor() override;
     bool hasEditor() const override                        { return true; }
@@ -32,7 +33,10 @@ public:
     bool acceptsMidi() const override                      { return false; }
     bool producesMidi() const override                     { return false; }
     bool isMidiEffect() const override                     { return false; }
-    double getTailLengthSeconds() const override           { return 3.5; }
+    double getTailLengthSeconds() const override
+    {
+        return juce::jmax (3.5, juce::jmax (bodyTailSeconds.load(), spaceTailSeconds.load() + 0.12));
+    }
 
     //==============================================================================
     // ファクトリープリセット
@@ -73,13 +77,11 @@ private:
     void timerCallback() override;
     void reloadBodyIR();
     void reloadSpaceIR();
+    void applyPendingIRs();
+    void processAudio (juce::AudioBuffer<float>&, bool hostBypass);
 
-    /** IR差し替えをまとめるまでの待ち時間(ms)。
-        bodyTune は刻み0.01の連続パラメータなので、値が変わるたびに
-        loadImpulseResponse を呼ぶとオートメーション時に極端な頻度になる。
-        JUCEのConvolutionは内部で std::function のキューを使っており、
-        その頻度に耐えられず空のfunctionを呼んで abort する。
-        バーストを1回にまとめる。 */
+    /** IR preparation is throttled. Buffers cross to the audio thread via
+        a try-locked mailbox; workers never touch a running Convolution. */
     static constexpr int kIRReloadDelayMs = 120;
 
     /** ブロックを内部バッファの上限以下に分割して処理する実体。 */
@@ -105,6 +107,17 @@ private:
     juce::dsp::Convolution spaceConvL;
     juce::dsp::Convolution spaceConvR;
 
+    struct PendingIR
+    {
+        juce::AudioBuffer<float> first, second;
+        double rate = 48000.0;
+        bool ready = false, trueStereo = false;
+    };
+    PendingIR pendingBody, pendingSpace;
+    juce::SpinLock pendingIRLock;
+    std::atomic<int> outputChannels { 2 };
+    std::atomic<double> bodyTailSeconds { 0.0 }, spaceTailSeconds { 2.9 };
+
     /** 無音のセクションは畳み込まない。既定はBODY/SPACEとも-60dB(切)なので、
         挿しただけの状態で2系統が無駄に回っていた。 */
     bool bodyWasActive { false }, spaceWasActive { false };
@@ -116,6 +129,8 @@ private:
     juce::AudioBuffer<float> bodyBuf, spaceBuf, spaceBufL, spaceBufR, wetBuf;
 
     juce::SmoothedValue<float> gDry, gBody, gSpace, gOut;
+    juce::SmoothedValue<float> gBypass;
+    bool bypassWasActive = false;
 
     /** Predelay と Wet HPF は値が飛ぶと音に出る。
         Predelay: 読み取り位置が瞬間移動してプチッと鳴る
@@ -128,7 +143,7 @@ private:
 
     double currentSampleRate { 48000.0 };
     float lastHpHz { -1.0f };
-    int currentProgram { 0 };
+    std::atomic<int> currentProgram { 0 };
 
     /** ユーザーIRのパスと直近のエラー。
         juce::ValueTree はスレッド安全ではないのに、IRの読み込みは

@@ -117,9 +117,13 @@ namespace
     }
 }
 
+#include "regression_tests.h"
+
 int main()
 {
     juce::ScopedJuceInitialiser_GUI juceInit;
+    runRegressionTests();
+    runAutomationStress();
 
     constexpr double sr = 48000.0;
     constexpr int prepared = 512;
