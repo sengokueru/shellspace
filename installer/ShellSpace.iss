@@ -19,6 +19,7 @@
 
 #define AppName    "ShellSpace"
 #define Publisher  "Yokosuka"
+#define MaxDawDirs 64
 
 [Setup]
 AppId={{7C4E0A1E-2B6D-4C39-9A55-5348454C4C53}
@@ -70,9 +71,12 @@ Name: "ir";   Description: "{cm:IrTask}";   Types: full
 Source: "{#SourceDir}\ShellSpace.vst3\*"; DestDir: "{app}\ShellSpace.vst3"; \
   Flags: ignoreversion recursesubdirs createallsubdirs; Components: vst3
 
-; --- 検出した DAW の VST3 フォルダにも（Cubase 12 対策）---
-Source: "{#SourceDir}\ShellSpace.vst3\*"; DestDir: "{code:GetDawVst3Dir}\ShellSpace.vst3"; \
-  Flags: ignoreversion recursesubdirs createallsubdirs; Components: vst3; Check: ShouldInstallToDaw
+; Declarative copies are tracked by the uninstaller, including additional DAWs.
+#define DawIndex
+#sub AddDawFiles
+Source: "{#SourceDir}\ShellSpace.vst3\*"; DestDir: "{code:GetDawVst3Dir|{#DawIndex}}\ShellSpace.vst3"; Flags: ignoreversion recursesubdirs createallsubdirs; Components: vst3; Check: ShouldInstallToDaw({#DawIndex})
+#endsub
+#for {DawIndex = 0; DawIndex < MaxDawDirs; DawIndex++} AddDawFiles
 
 ; --- IR の wav ---
 Source: "{#SourceDir}\IR\*.wav"; DestDir: "{code:GetDocsDir}\ShellSpace IR"; \
@@ -88,9 +92,6 @@ Name: "{group}\ShellSpace の IR フォルダ"; Filename: "{code:GetDocsDir}\She
 [Run]
 Filename: "{code:GetDocsDir}\ShellSpace IR"; Description: "IR フォルダを開く"; \
   Flags: postinstall shellexec skipifsilent unchecked; Components: ir
-
-[UninstallDelete]
-Type: filesandordirs; Name: "{app}\ShellSpace.vst3"
 
 [Code]
 var
@@ -129,6 +130,7 @@ var
   Root, Candidate: String;
 begin
   DawDirs := TStringList.Create;
+  if not IsAdminInstallMode then Exit;
   Roots[0] := ExpandConstant('{commonpf64}\Steinberg');
   Roots[1] := ExpandConstant('{commonpf32}\Steinberg');
 
@@ -146,7 +148,8 @@ begin
             if (FR.Name <> '.') and (FR.Name <> '..') then
             begin
               Candidate := Root + '\' + FR.Name + '\VST3';
-              if DirExists(Candidate) and (DawDirs.IndexOf(Candidate) < 0) then
+              if DirExists(Candidate) and (DawDirs.IndexOf(Candidate) < 0)
+                 and (DawDirs.Count < {#MaxDawDirs}) then
                 DawDirs.Add(Candidate);
             end;
           end;
@@ -166,9 +169,9 @@ begin
 
   DawPage := CreateInputOptionPage(wpSelectComponents,
     'DAW のフォルダにも入れますか',
-    'Cubase 12 には、標準の VST3 フォルダを見に行かないことがある既知の問題があります。',
-    'その場合、下のフォルダにも入れておくと確実に認識されます。' + #13#10 +
-    '不要なら外して構いません（あとから手でコピーしても直せます）。',
+    '標準の VST3 フォルダで認識されない場合の追加配置です。',
+    '必要な場合だけ追加先を選んでください。' + #13#10 +
+    '通常は標準フォルダへのインストールだけで構いません。',
     False, False);
 
   if DawDirs.Count = 0 then
@@ -181,8 +184,7 @@ begin
     for I := 0 to DawDirs.Count - 1 do
     begin
       DawPage.Add(DawDirs[I]);
-      { Cubase 12 は既定でON。それ以外もONにしておく（害がない） }
-      DawPage.Values[I] := True;
+      DawPage.Values[I] := False;
     end;
   end;
 end;
@@ -194,58 +196,23 @@ begin
     Result := True;
 end;
 
-{ 選ばれた DAW フォルダ（先頭の1つ）。複数ある場合は CurStepChanged で追加コピーする }
+{ Slot-based destinations allow every copy to use the normal uninstall log. }
 function GetDawVst3Dir(Param: String): String;
 var
   I: Integer;
 begin
-  Result := '';
-  if DawDirs = nil then
-    Exit;
-  for I := 0 to DawDirs.Count - 1 do
-    if DawPage.Values[I] then
-    begin
-      Result := DawDirs[I];
-      Exit;
-    end;
+  Result := GetVst3Dir('');
+  I := StrToIntDef(Param, -1);
+  if DawDirs = nil then Exit;
+  if (I >= 0) and (I < DawDirs.Count) then Result := DawDirs[I];
 end;
 
-function ShouldInstallToDaw: Boolean;
+function ShouldInstallToDaw(Index: Integer): Boolean;
 begin
-  Result := (GetDawVst3Dir('') <> '');
-end;
-
-{ 2つ目以降の DAW フォルダへは、インストール後にコピーする }
-procedure CurStepChanged(CurStep: TSetupStep);
-var
-  I, Count: Integer;
-  Src, Dst: String;
-begin
-  if CurStep <> ssPostInstall then
-    Exit;
-  if DawDirs = nil then
-    Exit;
-
-  Src := GetVst3Dir('') + '\ShellSpace.vst3';
-  Count := 0;
-
-  for I := 0 to DawDirs.Count - 1 do
-  begin
-    if not DawPage.Values[I] then
-      Continue;
-    Count := Count + 1;
-    if Count = 1 then
-      Continue;  { 1つ目は [Files] で処理済み }
-
-    Dst := DawDirs[I] + '\ShellSpace.vst3';
-    if DirExists(Dst) then
-      DelTree(Dst, True, True, True);
-    if not DirExists(Dst) then
-      ForceDirectories(Dst);
-    { フォルダごとコピー }
-    Exec(ExpandConstant('{cmd}'), '/c xcopy "' + Src + '" "' + Dst + '" /E /I /Y /Q',
-         '', SW_HIDE, ewWaitUntilTerminated, I);
-  end;
+  Result := False;
+  if DawDirs = nil then Exit;
+  if (Index < 0) or (Index >= DawDirs.Count) then Exit;
+  Result := DawPage.Values[Index];
 end;
 
 procedure DeinitializeSetup;
