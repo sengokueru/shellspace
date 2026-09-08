@@ -95,17 +95,29 @@ private:
 
     juce::AudioFormatManager formatManager;
 
-    /** 分割方式は JUCE 既定（均一分割・ゼロレイテンシ）のまま。
-        非均一分割(NonUniform{256})も試したが、実測で判断を分けた:
-          ブロック長 64  BODY+SPACE  0.893 -> 0.238  (改善)
-          ブロック長 512 BODY+SPACE  0.087 -> 0.194  (悪化)
-        512 は最もよく使われる設定で、そこで2倍以上重くなるため採用しない。
-        ブロック長に応じて head サイズを変える手はあるが、Convolution は
-        構築時にしか決められず作り直しが要る。効果と複雑さが釣り合わない。 */
-    juce::dsp::Convolution bodyConv;
-    juce::dsp::Convolution spaceConv;
-    juce::dsp::Convolution spaceConvL;
-    juce::dsp::Convolution spaceConvR;
+    /** Small host blocks benefit from larger tail partitions. Recreate only in
+        prepareToPlay, never while audio is running. Both policies have zero latency. */
+    struct AdaptiveConvolution
+    {
+        using Conv = juce::dsp::Convolution;
+        std::unique_ptr<Conv> engine;
+        void configure (int blockSize)
+        {
+            if (blockSize < 256)
+                engine = std::make_unique<Conv> (Conv::NonUniform { 256 });
+            else
+                engine = std::make_unique<Conv>();
+        }
+        void prepare (const juce::dsp::ProcessSpec& spec) { engine->prepare (spec); }
+        void reset() { if (engine != nullptr) engine->reset(); }
+        void loadImpulseResponse (juce::AudioBuffer<float>&& buffer, double rate,
+                                  Conv::Stereo stereo, Conv::Trim trim, Conv::Normalise normalise)
+        {
+            engine->loadImpulseResponse (std::move (buffer), rate, stereo, trim, normalise);
+        }
+        template <typename Context> void process (const Context& context) { engine->process (context); }
+    };
+    AdaptiveConvolution bodyConv, spaceConv, spaceConvL, spaceConvR;
 
     struct PendingIR
     {

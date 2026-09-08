@@ -16,7 +16,8 @@
 namespace
 {
     constexpr double kSR = 48000.0;
-    constexpr double kSeconds = 10.0;
+    double kSeconds = 10.0;
+    int repetitions = 3;
 
     void setNorm (ShellSpaceProcessor& p, const juce::String& id, float v)
     {
@@ -88,7 +89,7 @@ namespace
     Result measure (int blockSize, bool body, bool space, bool trueStereo, bool bypass = false)
     {
         Result best { 1e9, 1e9 };
-        for (int i = 0; i < 3; ++i)
+        for (int i = 0; i < repetitions; ++i)
         {
             const auto r = measureOnce (blockSize, body, space, trueStereo, bypass);
             if (r.realtimeRatio < best.realtimeRatio)
@@ -98,12 +99,14 @@ namespace
     }
 }
 
-int main()
+int main (int argc, char** argv)
 {
     juce::ScopedJuceInitialiser_GUI juceInit;
+    const bool quick = argc > 1 && juce::String (argv[1]) == "--quick";
+    if (quick) { kSeconds = 2.0; repetitions = 1; }
 
     std::cout << "ShellSpace CPU負荷 (48kHz, " << kSeconds << "秒ぶんを処理)" << std::endl;
-    std::cout << "リアルタイム比 = CPU時間 / 音の長さ。0.01 = 1コアの1%" << std::endl;
+    std::cout << "Ratio = elapsed wall time / audio duration (includes scheduler and test input cost)" << std::endl;
     std::cout << std::endl;
 
     struct Case { const char* name; bool body, space, ts, bypass; };

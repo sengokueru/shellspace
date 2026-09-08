@@ -49,6 +49,40 @@ static void runAutomationStress()
 static void runRegressionTests()
 {
     juce::MidiBuffer midi;
+    for (int mode = 0; mode < 3; ++mode)
+    {
+        auto render = [&midi, mode] (int size)
+        {
+            ShellSpaceProcessor p;
+            if (mode == 0) configureBodyOnly (p);
+            else configureSpaceOnly (p, mode == 2);
+            p.prepareToPlay (48000, size);
+            std::vector<float> samples;
+            juce::AudioBuffer<float> b (2, size);
+            for (int offset = 0; offset < 147456; offset += size)
+            {
+                b.clear();
+                if (offset == 0) { b.setSample (0, 0, 1); b.setSample (1, 0, 0.3f); }
+                p.processBlock (b, midi);
+                for (int i = 0; i < size; ++i)
+                    for (int ch = 0; ch < 2; ++ch) samples.push_back (b.getSample (ch, i));
+            }
+            return samples;
+        };
+        const auto small = render (64), large = render (512);
+        float diff = 0, peak = 0;
+        for (size_t i = 0; i < small.size(); ++i)
+        {
+            diff = std::max (diff, std::abs (small[i] - large[i]));
+            peak = std::max (peak, std::abs (large[i]));
+        }
+        // Different FFT partitions reorder float summations. Bound both the
+        // absolute error (-100 dBFS) and the error relative to the response peak
+        // (0.1%); this is not a bit-identity claim. Cover the full hall tail.
+        check (diff < 1e-5f && diff < peak * 0.001f && peak > 0.001f,
+               "Partition policies preserve the stereo impulse response mode " + juce::String (mode),
+               "diff=" + juce::String (diff, 9));
+    }
     {
         ShellSpaceProcessor p;
         Fader fader (p.apvts, "bodyLevel", {});

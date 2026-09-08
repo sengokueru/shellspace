@@ -477,7 +477,7 @@ void ShellSpaceProcessor::applyPendingIRs()
 {
     const juce::SpinLock::ScopedTryLockType mailboxLock (pendingIRLock);
     if (! mailboxLock.isLocked()) return; // Keep the current IR; never wait.
-    auto load = [] (juce::dsp::Convolution& conv, juce::AudioBuffer<float>& data, double rate)
+    auto load = [] (AdaptiveConvolution& conv, juce::AudioBuffer<float>& data, double rate)
     {
         conv.loadImpulseResponse (std::move (data), rate,
                                   juce::dsp::Convolution::Stereo::yes,
@@ -518,6 +518,7 @@ void ShellSpaceProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     // Unused routes start silent, never as JUCE's default identity IR.
     for (auto* c : { &bodyConv, &spaceConv, &spaceConvL, &spaceConvR })
     {
+        c->configure (samplesPerBlock);
         juce::AudioBuffer<float> silence (2, 1);
         silence.clear();
         c->loadImpulseResponse (std::move (silence), sampleRate,
@@ -658,7 +659,7 @@ void ShellSpaceProcessor::processAudio (juce::AudioBuffer<float>& buffer, bool h
 void ShellSpaceProcessor::processChunk (juce::AudioBuffer<float>& buffer, int numCh,
                                         int offset, int n)
 {
-    auto processConv = [numCh, n] (juce::dsp::Convolution& conv, juce::AudioBuffer<float>& buf)
+    auto processConv = [numCh, n] (AdaptiveConvolution& conv, juce::AudioBuffer<float>& buf)
     {
         juce::dsp::AudioBlock<float> block (buf.getArrayOfWritePointers(),
                                             (size_t) numCh, (size_t) n);
