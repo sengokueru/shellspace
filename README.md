@@ -29,7 +29,7 @@ Wet HPF は **WET 側だけ**に掛かるので、原音の低域を削らずに
 | **Shell Character** | Studio / Projection / Tight / Open（胴の構造による鳴り方の違い） |
 | **SPACE** | 天井の高いオペラハウス型ホール。Full / ドラム用（低域を締めた版）。**True Stereo**（4ch IR）対応 |
 | **IR 差し替え** | 各セクションから自分の wav を読み込める。パスはプロジェクトに保存される |
-| **プリセット** | 7 種 |
+| **プリセット** | 9 種（Initを含む） |
 
 Level 系は既定が **-60dB（＝切）**。挿しただけでは音が変わらない。
 
@@ -114,7 +114,7 @@ py -3 IR/verify_ir.py IR      # 実測検証（RT60・ピーク・モード・ch
 
 ## ビルド
 
-必要なもの: Visual Studio 2022 Build Tools（C++ ワークロード）/ CMake 3.22+ / JUCE 8 / Python + numpy
+必要なもの: Visual Studio 2022 Build Tools（C++ ワークロード）/ CMake 3.22+ / Python + numpy。JUCEはCMakeに固定したリビジョンを取得するか、ローカル配置を指定する。
 
 ```powershell
 cd ShellSpace
@@ -140,6 +140,19 @@ cd ShellSpace
 ```
 
 外部検証には [pluginval](https://github.com/Tracktion/pluginval) を strictness 10 で使用。
+
+配布前チェック（リポジトリのルートで実行）:
+
+```powershell
+py -3 -m unittest discover -s tests -v
+py -3 scripts/release_version.py
+```
+
+IR検証は生成対象54本の欠落・余分なWAV・形式違い・無音・クリップ・
+L/R不一致・True Stereoの初期反射配置・キャビ帯域の異常を終了コード1で報告する。
+RT60やモードの数値は参考測定で、聴感の良し悪しを保証する検査ではない。
+旧版の生成物が混じる場合は、空の別フォルダへ生成して検証すること。
+CIのパッケージ版数はCMakeから取得し、タグとの不一致もエラーにする。
 
 ### 実測値
 
@@ -168,9 +181,9 @@ cd ShellSpace
 
 ## 既知の制約
 
-- **Tune を動かすと反映まで最大120msの遅れがある。** 値が変わるたびに IR を
-  作り直すため、掃引中は再構築をまとめている。オートメーションしても重くならないが、
-  瞬時には追従しない
+- **Tune等のIR切替は、最後の変更から約120ms待って再構築を開始する。**
+  変更が続く間はタイマーを張り直すため、連続した掃引には追従しない。
+  メッセージ処理と非同期読み込みの時間も加わるので、120msは反映時間の上限ではない。
 - 挿した直後のごく短い間、IR の読み込みが終わっていない可能性がある（別スレッドで読むため）
 - **DAW での実動作は未検証**（開発環境に DAW が無いため）。高DPI表示、CPU負荷、
   長時間動作も確認していない

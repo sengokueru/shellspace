@@ -27,7 +27,7 @@ HPFは**WETだけ**に掛かるので、原音の低域を削らずに残響の�
 | BODY | Type | Kick / Snare / Tom / Guitar 4x12 / Bass 8x10 | Kick | 埋め込みIRを切替 |
 | BODY | Shell Material | Maple / Birch / Mahogany / Oak | Birch | ドラム選択時のみ有効 |
 | BODY | Shell Character | Studio / Projection / Tight / Open | Studio | 胴の構造による鳴り方。ドラム選択時のみ有効 |
-| BODY | Tune | -12〜+12 半音 | 0 | **IRを時間軸ごと伸縮**。実機のチューニングと同じ挙動（減衰も同比率で変わる） |
+| BODY | Tune | -12〜+12 半音 | 0 | **IRを時間軸ごと伸縮**。ピッチと減衰時間が連動する。実機のチューニングを物理再現するものではない |
 | BODY | Level | -60〜+12 dB | -60（切） | |
 | SPACE | Type | Hall Full / Hall Drum | Hall Drum | Drumは低域を締めた版 |
 | SPACE | Predelay | 0〜120 ms | 20 | IR自体も最初の反射が約10msにある |
@@ -87,7 +87,7 @@ Level系は既定が **-60dB（＝無音）**。挿しただけでは音が変�
 
 `build.ps1` はIRが無ければ `make_ir.py` を先に走らせる。
 ビルドが通ると `COPY_PLUGIN_AFTER_BUILD` で
-`C:\Program Files\Common Files\VST3\ShellSpace.vst3` に自動配置される。
+`%LOCALAPPDATA%\Programs\Common\VST3\ShellSpace.vst3` に自動配置される。
 Cubaseはプラグインマネージャーで再スキャンが必要。
 
 手で叩く場合:
@@ -190,15 +190,18 @@ VST3経由ではなくプラグインのソースを直接リンクしている
 
 ## 設計上の割り切り
 
-- **True Stereo（4ch IR）は未対応。** 2chのStereo版IRを埋め込んでいる。
-  4chを扱うには畳み込みを4系統に増やす必要があり、v1では入れていない。
-  True Stereoが要るときは REVerence に `Hall_..._TrueStereo.wav` を読ませるほうが早い。
+- **True Stereo（4ch LL/LR/RL/RR）に対応。** ステレオ畳み込み2系統で左右入力を処理する。
+  モノラルバスでは通常の畳み込み経路に切り替わる。
 - BODYのIRはデュアルモノなので、モノ互換で位相が崩れない。
-- Tune変更時はIRを再構築して `loadImpulseResponse` に渡す。JUCE側が
-  バックグラウンドで差し替えるので音は途切れないが、**オートメーションで
-  高速に動かす用途は想定していない**。
+- Tune等のIR切替は、最後の変更から約120ms待って再構築を開始する。
+  変更が続く間はタイマーが延長されるため、**連続した掃引には追従しない**。
+  非同期読み込みの時間も必要で、120msは反映時間の上限ではない。
 
 ## IRを差し替えたいとき
+
+自分のWAVを使う場合は、エディタのBODY/SPACEの読み込み操作から選択できる。
+再ビルドは不要で、ファイルのパスがDAWプロジェクトに保存される。
+以下は内蔵IR自体を変更する開発者向けの手順。
 
 1. `../IR/make_ir.py` を編集して wav を作り直す
 2. `.\build.ps1` で再ビルド（wavはバイナリ埋め込みなので再ビルドが要る）
