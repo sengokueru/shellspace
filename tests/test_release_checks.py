@@ -7,9 +7,13 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 import wave
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "IR"))
+import prepare_ir
+from ir_manifest import EXPECTED
 spec = importlib.util.spec_from_file_location("release_version", ROOT / "scripts/release_version.py")
 version_module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(version_module)
@@ -40,6 +44,32 @@ class ReleaseVersionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             version_module.read_version("project(ShellSpace VERSION 0.4.1)", "v0.4.0")
 
+
+class PrepareIRTests(unittest.TestCase):
+    def test_missing_assets_generate_then_verify(self):
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(prepare_ir.subprocess, "run") as run:
+            prepare_ir.prepare(directory)
+            self.assertEqual(run.call_count, 2)
+            self.assertTrue(run.call_args_list[0].args[0][1].endswith("make_ir.py"))
+            self.assertTrue(run.call_args_list[1].args[0][1].endswith("verify_ir.py"))
+            self.assertTrue(all(c.kwargs["check"] for c in run.call_args_list))
+
+    def test_existing_assets_only_verify(self):
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(prepare_ir.subprocess, "run") as run:
+            for name in EXPECTED:
+                (Path(directory) / name).touch()
+            prepare_ir.prepare(directory)
+            self.assertEqual(run.call_count, 1)
+            self.assertTrue(run.call_args.args[0][1].endswith("verify_ir.py"))
+
+    def test_legacy_files_are_preserved_and_stop_build(self):
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(prepare_ir.subprocess, "run") as run:
+            legacy = Path(directory) / "Shell_Kick_body.wav"
+            legacy.write_bytes(b"preserve me")
+            with self.assertRaises(ValueError):
+                prepare_ir.prepare(directory)
+            self.assertEqual(legacy.read_bytes(), b"preserve me")
+            run.assert_not_called()
 
 class IRGateTests(unittest.TestCase):
     @classmethod
@@ -94,6 +124,10 @@ class IRGateTests(unittest.TestCase):
 
     def test_corrupt_file(self):
         self.target.write_bytes(b"not a WAV")
+        self.verify(1)
+
+    def test_truncated_file(self):
+        self.target.write_bytes(self.target.read_bytes()[:-6])
         self.verify(1)
 
     def test_unexpected_legacy_file(self):

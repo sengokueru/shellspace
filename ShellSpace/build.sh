@@ -10,15 +10,13 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 build="$root/build"
 
 if [[ "${1:-}" == "--clean" ]]; then
+  [[ "$build" == "$root/build" && ! -L "$build" ]] || { echo "Unsafe build path"; exit 1; }
   rm -rf "$build"
 fi
 
 # --- IR が生成済みか確認 ---------------------------------------------------
 ir_dir="$root/../IR"
-if [[ ! -f "$ir_dir/Shell_Kick_body.wav" ]]; then
-  echo "IRが未生成なので生成します..."
-  python3 "$ir_dir/make_ir.py" "$ir_dir"
-fi
+python3 "$ir_dir/prepare_ir.py" "$ir_dir"
 
 cmake -B "$build" -S "$root" -DCMAKE_BUILD_TYPE=Release
 cmake --build "$build" --config Release --parallel

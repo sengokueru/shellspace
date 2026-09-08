@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """生成したIRを実測で検証する。RT60(T20)・ピーク・モード・True Stereoのch順。"""
 import numpy as np, wave, glob, os, sys
+from ir_manifest import EXPECTED
 
 # 日本語を出すので標準出力をUTF-8に固定する。
 # これが無いと、コンソールのコードページ次第で UnicodeEncodeError で落ちる
@@ -17,7 +18,10 @@ def read24(p):
         if w.getsampwidth() != 3:
             raise ValueError(f'Expected 24-bit PCM, got {w.getsampwidth() * 8}-bit')
         ch, fr, n = w.getnchannels(), w.getframerate(), w.getnframes()
-        raw = np.frombuffer(w.readframes(n), dtype=np.uint8).reshape(-1, 3)
+        frames = w.readframes(n)
+        if len(frames) != n * ch * 3:
+            raise ValueError('Truncated PCM data')
+        raw = np.frombuffer(frames, dtype=np.uint8).reshape(-1, 3)
     b = np.zeros((raw.shape[0], 4), dtype=np.uint8)
     b[:, 1:] = raw
     return b.view('<i4').ravel().astype(np.float64).reshape(-1, ch) / 2**31, fr, ch
@@ -50,13 +54,7 @@ def require(condition, message):
         print('  FAIL:', message)
 
 
-expected = {f'Shell_{kind}_{material}_{character}.wav'
-            for kind in ('Kick', 'Snare', 'Tom')
-            for material in ('Maple', 'Birch', 'Mahogany', 'Oak')
-            for character in ('Studio', 'Projection', 'Tight', 'Open')}
-expected.update({'Cab_Guitar_4x12.wav', 'Cab_Bass_8x10.wav'})
-expected.update(f'Hall_Yokosuka-type_{kind}_{layout}.wav'
-                for kind in ('Full', 'Drum') for layout in ('Stereo', 'TrueStereo'))
+expected = EXPECTED
 present = {os.path.basename(p) for p in glob.glob(os.path.join(D, '*.wav'))}
 require(expected <= present, 'Missing IR files: ' + ', '.join(sorted(expected - present)))
 require(present <= expected, 'Unexpected IR files: ' + ', '.join(sorted(present - expected)))
