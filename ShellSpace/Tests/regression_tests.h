@@ -87,12 +87,37 @@ static void runRegressionTests()
         ShellSpaceProcessor p;
         Fader fader (p.apvts, "bodyLevel", {});
         fader.slider.setValue (-12, juce::sendNotificationSync);
+        const double before = fader.slider.getValue();
+        const float parameterBefore = p.apvts.getRawParameterValue ("bodyLevel")->load();
+        // JUCE snaps a float range in 0.1 dB increments. Fused multiply-add
+        // may round differently from separate multiply/add on another target.
+        // This tolerance is 10000 times smaller than a single parameter step.
+        constexpr double dbTolerance = 1.0e-5;
+        check (std::abs (before + 12.0) < dbTolerance, "dB fixture starts near -12",
+               juce::String (before, 12));
         fader.value.setText ("abc12", juce::dontSendNotification);
         fader.value.onTextChange();
-        check (fader.slider.getValue() == -12, "Malformed dB text does not change gain");
+        const double afterInvalid = fader.slider.getValue();
+        check (afterInvalid == before
+                   && p.apvts.getRawParameterValue ("bodyLevel")->load() == parameterBefore,
+               "Malformed dB text does not change gain",
+               "before=" + juce::String (before, 12) + " after=" + juce::String (afterInvalid, 12));
         fader.value.setText ("-6 dB", juce::dontSendNotification);
         fader.value.onTextChange();
-        check (fader.slider.getValue() == -6, "Valid dB suffix is accepted");
+        const double afterValid = fader.slider.getValue();
+        const float parameterAfter = p.apvts.getRawParameterValue ("bodyLevel")->load();
+        check (std::abs (afterValid + 6.0) < dbTolerance
+                   && std::abs (parameterAfter + 6.0) < dbTolerance
+                   && fader.value.getText() == "-6.0",
+               "Valid dB suffix is accepted",
+               "slider=" + juce::String (afterValid, 12)
+                   + " parameter=" + juce::String (parameterAfter, 12)
+                   + " label=" + fader.value.getText());
+        std::cout << "  dB legacy exact comparisons: invalid=" << (afterInvalid == -12)
+                  << " valid=" << (afterValid == -6)
+                  << "; float fused grid -12=" << juce::String (std::fma (0.1f, 480.0f, -60.0f), 12)
+                  << " -6=" << juce::String (std::fma (0.1f, 540.0f, -60.0f), 12)
+                  << std::endl;
     }
     auto processSilence = [&midi] (ShellSpaceProcessor& p, int blocks, int size = 64)
     {
